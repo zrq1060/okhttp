@@ -610,6 +610,7 @@ class Cookie private constructor(
     /** Returns all of the cookies from a set of HTTP response headers. */
     @JvmStatic
     fun parseAll(url: HttpUrl, headers: Headers): List<Cookie> {
+      // 其实就是取响应头中Set-Cookie字段的值，判断是cookie值转为cookie对象存储在list中返回
       val cookieStrings = headers.values("Set-Cookie")
       var cookies: MutableList<Cookie>? = null
 

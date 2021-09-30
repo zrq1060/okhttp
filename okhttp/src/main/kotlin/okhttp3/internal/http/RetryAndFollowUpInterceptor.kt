@@ -73,9 +73,11 @@ class RetryAndFollowUpInterceptor(private val client: OkHttpClient) : Intercepto
         }
 
         try {
+          // 2. 开始执行，进入后续拦截器，真正进行网络请求；
           response = realChain.proceed(request)
           newExchangeFinder = true
         } catch (e: RouteException) {
+          // 3. 发生RouteException：路由链接异常的场景，请求不会被发送，抛出首次链接异常
           // The attempt to connect via a route failed. The request will not have been sent.
           if (!recover(e.lastConnectException, call, request, requestSendStarted = false)) {
             throw e.firstConnectException.withSuppressed(recoveredFailures)
@@ -85,6 +87,7 @@ class RetryAndFollowUpInterceptor(private val client: OkHttpClient) : Intercepto
           newExchangeFinder = false
           continue
         } catch (e: IOException) {
+          // 4. 发生IOException异常，是否可恢复判断逻辑参照上述RouteException判断逻辑
           // An attempt to communicate with a server failed. The request may have been sent.
           if (!recover(e, call, request, requestSendStarted = e !is ConnectionShutdownException)) {
             throw e.withSuppressed(recoveredFailures)
@@ -96,6 +99,7 @@ class RetryAndFollowUpInterceptor(private val client: OkHttpClient) : Intercepto
         }
 
         // Attach the prior response if it exists. Such responses never have a body.
+        // 5. 根据上一个Response结果构建一个新的response对象，且这个对象的body为空
         if (priorResponse != null) {
           response = response.newBuilder()
               .priorResponse(priorResponse.newBuilder()
@@ -104,9 +108,11 @@ class RetryAndFollowUpInterceptor(private val client: OkHttpClient) : Intercepto
               .build()
         }
 
+        // 6. 根据请求码创建一个新的请求，以供下一次重试请求使用
         val exchange = call.interceptorScopedExchange
         val followUp = followUpRequest(response, exchange)
 
+        // 7. 如果第六步构建的出来的Request为空，则不再进行，直接返回Response
         if (followUp == null) {
           if (exchange != null && exchange.isDuplex) {
             call.timeoutEarlyExit()
@@ -115,6 +121,7 @@ class RetryAndFollowUpInterceptor(private val client: OkHttpClient) : Intercepto
           return response
         }
 
+        // 8. 构建的Request对象存在请求body，且为一次性请求，则直接返回Response，也不进行重试。
         val followUpBody = followUp.body
         if (followUpBody != null && followUpBody.isOneShot()) {
           closeActiveExchange = false
@@ -123,10 +130,12 @@ class RetryAndFollowUpInterceptor(private val client: OkHttpClient) : Intercepto
 
         response.body?.closeQuietly()
 
+        // 9. 判断当前重试次数是否已经到达最大次数（默认20），如果到达，则直接抛出异常
         if (++followUpCount > MAX_FOLLOW_UPS) {
           throw ProtocolException("Too many follow-up requests: $followUpCount")
         }
 
+        // 10. 如果上述没有抛出异常或者中断循环，则进入while循环，开始下一次重试过程
         request = followUp
         priorResponse = response
       } finally {
@@ -141,6 +150,7 @@ class RetryAndFollowUpInterceptor(private val client: OkHttpClient) : Intercepto
    * be recovered if the body is buffered or if the failure occurred before the request has been
    * sent.
    */
+  // 是否可恢复
   private fun recover(
     e: IOException,
     call: RealCall,
@@ -148,18 +158,29 @@ class RetryAndFollowUpInterceptor(private val client: OkHttpClient) : Intercepto
     requestSendStarted: Boolean
   ): Boolean {
     // The application layer has forbidden retries.
+    // 1. 首先判断是否允许重试，根据我们创建请求的时候配置的重试开关，如果配置为false，则不允许重试;
     if (!client.retryOnConnectionFailure) return false
 
     // We can't send the request body again.
+    // 2. 第二层判断如果请求已经开始，且当前请求最多只能被发送一次的情况下，则不允许重试；
     if (requestSendStarted && requestIsOneShot(e, userRequest)) return false
 
     // This exception is fatal.
+    // 3. 判断当前请求是否可恢复的，以下异常场景不可恢复：
+    //    a. ProtocolException，协议异常
+    //    b. SocketTimeoutException，Socket链接超时且请求没有开始
+    //    c. SSLHandshakeException && CertificateException ：
+    //        表示和服务端约定的安全级别不匹配异常，引起基本为证书引起的，这种链接是不可用的。
+    //    d. SSLPeerUnverifiedException
+    //        对等实体认证异常，也就是说对等个体没有被验证，类似没有证书，或者在握手期间没有建立对等个体验证；
     if (!isRecoverable(e, requestSendStarted)) return false
 
     // No more routes to attempt.
+    // 4. 判断是否存在其他可重试的路由，如果不存在，不允许重试；
     if (!call.retryAfterFailure()) return false
 
     // For failure recovery, use the same route selector with a new connection.
+    // 5. 不属于上述情况判断可以重试；
     return true
   }
 
@@ -213,6 +234,7 @@ class RetryAndFollowUpInterceptor(private val client: OkHttpClient) : Intercepto
     val method = userResponse.request.method
     when (responseCode) {
       HTTP_PROXY_AUTH -> {
+        // HTTP_PROXY_AUTH（407）：代理认证，需要进行代理认证（默认实现返回null，可以进行重写覆盖实现）；
         val selectedProxy = route!!.proxy
         if (selectedProxy.type() != Proxy.Type.HTTP) {
           throw ProtocolException("Received HTTP_PROXY_AUTH (407) code while not using proxy")
@@ -220,13 +242,21 @@ class RetryAndFollowUpInterceptor(private val client: OkHttpClient) : Intercepto
         return client.proxyAuthenticator.authenticate(route, userResponse)
       }
 
+      // HTTP_UNAUTHORIZED（401）：未授权，需要进行授权认证（默认实现返回null，可以进行重写覆盖实现）；
       HTTP_UNAUTHORIZED -> return client.authenticator.authenticate(route, userResponse)
 
       HTTP_PERM_REDIRECT, HTTP_TEMP_REDIRECT, HTTP_MULT_CHOICE, HTTP_MOVED_PERM, HTTP_MOVED_TEMP, HTTP_SEE_OTHER -> {
+        // HTTP_PERM_REDIRECT（307）临时重定向
+        // HTTP_TEMP_REDIRECT（308）永久重定向
+        // HTTP_MULT_CHOICE（300） 多选项
+        // HTTP_MOVED_PERM（301） 永久重定向，表示请求的资源已经分配了新的URI，以后应该使用新的URI
+        // HTTP_MOVED_TEMP（302）临时性重定向
+        // HTTP_SEE_OTHER（303）表示由于请求对应的资源存在着另外一个URI，应该使用GET方法定向获取请求的资源
         return buildRedirectRequest(userResponse, method)
       }
 
       HTTP_CLIENT_TIMEOUT -> {
+        // HTTP_CLIENT_TIMEOUT（408）：请求超时，逻辑如下
         // 408's are rare in practice, but some servers like HAProxy use this response code. The
         // spec says that we may repeat the request without modifications. Modern browsers also
         // repeat the request (even non-idempotent ones.)
@@ -253,6 +283,7 @@ class RetryAndFollowUpInterceptor(private val client: OkHttpClient) : Intercepto
       }
 
       HTTP_UNAVAILABLE -> {
+        // HTTP_UNAVAILABLE（503）：表明服务器暂时处于超负载或正在进行停机维护，现无法处理请求。
         val priorResponse = userResponse.priorResponse
         if (priorResponse != null && priorResponse.code == HTTP_UNAVAILABLE) {
           // We attempted to retry and got another timeout. Give up.

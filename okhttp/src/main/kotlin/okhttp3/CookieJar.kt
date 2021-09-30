@@ -37,6 +37,7 @@ interface CookieJar {
    * includes a trailer. For this obscure HTTP feature, [cookies] contains only the trailer's
    * cookies.
    */
+  //存储cookie
   fun saveFromResponse(url: HttpUrl, cookies: List<Cookie>)
 
   /**
@@ -46,11 +47,13 @@ interface CookieJar {
    * Simple implementations will return the accepted cookies that have not yet expired and that
    * [match][Cookie.matches] [url].
    */
+  //通过url读取cookie
   fun loadForRequest(url: HttpUrl): List<Cookie>
 
   companion object {
     /** A cookie jar that never accepts any cookies. */
     @JvmField
+    // 默认实现
     val NO_COOKIES: CookieJar = NoCookies()
     private class NoCookies : CookieJar {
       override fun saveFromResponse(url: HttpUrl, cookies: List<Cookie>) {

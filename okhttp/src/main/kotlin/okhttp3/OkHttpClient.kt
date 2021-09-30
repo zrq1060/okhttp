@@ -244,7 +244,9 @@ open class OkHttpClient internal constructor(
       this.certificatePinner = builder.certificatePinner
           .withCertificateChainCleaner(certificateChainCleaner!!)
     } else {
+      // 获取证书信任管理器
       this.x509TrustManager = Platform.get().platformTrustManager()
+      // 用指定的证书信任管理器，来创建一个sslSocket工厂
       this.sslSocketFactoryOrNull = Platform.get().newSslSocketFactory(x509TrustManager!!)
       this.certificateChainCleaner = CertificateChainCleaner.get(x509TrustManager!!)
       this.certificatePinner = builder.certificatePinner
@@ -477,33 +479,58 @@ open class OkHttpClient internal constructor(
   fun pingIntervalMillis(): Int = pingIntervalMillis
 
   class Builder constructor() {
+    //调度器
     internal var dispatcher: Dispatcher = Dispatcher()
+    //连接池
     internal var connectionPool: ConnectionPool = ConnectionPool()
+    //拦截器列表
     internal val interceptors: MutableList<Interceptor> = mutableListOf()
+    //网络拦截器列表
     internal val networkInterceptors: MutableList<Interceptor> = mutableListOf()
+    //事件监听
     internal var eventListenerFactory: EventListener.Factory = EventListener.NONE.asFactory()
+    //连接失败的时候是否重试
     internal var retryOnConnectionFailure = true
+    //源服务器身份验证
     internal var authenticator: Authenticator = Authenticator.NONE
+    //是否允许重定向
     internal var followRedirects = true
+    //是否允许ssl重定向
     internal var followSslRedirects = true
+    //Cookie
     internal var cookieJar: CookieJar = CookieJar.NO_COOKIES
+    //缓存
     internal var cache: Cache? = null
+    //DNS
     internal var dns: Dns = Dns.SYSTEM
+    //代理
     internal var proxy: Proxy? = null
+    //代理选择器
     internal var proxySelector: ProxySelector? = null
+    //代理身份验证
     internal var proxyAuthenticator: Authenticator = Authenticator.NONE
+    //Socket工厂
     internal var socketFactory: SocketFactory = SocketFactory.getDefault()
+    //安全套接层
     internal var sslSocketFactoryOrNull: SSLSocketFactory? = null
     internal var x509TrustManagerOrNull: X509TrustManager? = null
     internal var connectionSpecs: List<ConnectionSpec> = DEFAULT_CONNECTION_SPECS
+    //HTTP 协议
     internal var protocols: List<Protocol> = DEFAULT_PROTOCOLS
+    //主机名字确认
     internal var hostnameVerifier: HostnameVerifier = OkHostnameVerifier
+    //证书链
     internal var certificatePinner: CertificatePinner = CertificatePinner.DEFAULT
     internal var certificateChainCleaner: CertificateChainCleaner? = null
+    //回调超时
     internal var callTimeout = 0
+    //连接超时
     internal var connectTimeout = 10_000
+    //读超时
     internal var readTimeout = 10_000
+    //写超时
     internal var writeTimeout = 10_000
+    //ping 之间的时间间隔
     internal var pingInterval = 0
     internal var minWebSocketMessageToCompress = RealWebSocket.DEFAULT_MINIMUM_DEFLATE_SIZE
     internal var routeDatabase: RouteDatabase? = null

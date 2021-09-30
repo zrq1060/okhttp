@@ -43,6 +43,7 @@ class Dispatcher constructor() {
    * If more than [maxRequests] requests are in flight when this is invoked, those requests will
    * remain in flight.
    */
+  // 同一时间允许并发执行网络请求的最大线程数
   @get:Synchronized var maxRequests = 64
     set(maxRequests) {
       require(maxRequests >= 1) { "max < 1: $maxRequests" }
@@ -62,6 +63,7 @@ class Dispatcher constructor() {
    *
    * WebSocket connections to hosts **do not** count against this limit.
    */
+  // 同一 host 下的最大同时请求数
   @get:Synchronized var maxRequestsPerHost = 5
     set(maxRequestsPerHost) {
       require(maxRequestsPerHost >= 1) { "max < 1: $maxRequestsPerHost" }
@@ -99,12 +101,15 @@ class Dispatcher constructor() {
     }
 
   /** Ready async calls in the order they'll be run. */
+  // 保存当前等待执行的异步任务
   private val readyAsyncCalls = ArrayDeque<AsyncCall>()
 
   /** Running asynchronous calls. Includes canceled calls that haven't finished yet. */
+  // 保存当前正在执行的异步任务
   private val runningAsyncCalls = ArrayDeque<AsyncCall>()
 
   /** Running synchronous calls. Includes canceled calls that haven't finished yet. */
+  // 保存当前正在执行的同步任务
   private val runningSyncCalls = ArrayDeque<RealCall>()
 
   constructor(executorService: ExecutorService) : this() {
@@ -113,15 +118,19 @@ class Dispatcher constructor() {
 
   internal fun enqueue(call: AsyncCall) {
     synchronized(this) {
+      // 存到 readyAsyncCalls 中
       readyAsyncCalls.add(call)
 
       // Mutate the AsyncCall so that it shares the AtomicInteger of an existing running call to
       // the same host.
       if (!call.call.forWebSocket) {
+        // 查找当前是否有指向同一 Host 的异步请求
         val existingCall = findExistingCallWithHost(call.host)
+        // 有则交换 callsPerHost 变量，该变量就用于标记当前指向同一 Host 的请求数量
         if (existingCall != null) call.reuseCallsPerHostFrom(existingCall)
       }
     }
+    // 调用 promoteAndExecute 方法来判断当前是否允许发起请求
     promoteAndExecute()
   }
 
@@ -158,6 +167,9 @@ class Dispatcher constructor() {
    *
    * @return true if the dispatcher is currently running calls.
    */
+  // 由于当前正在执行的网络请求总数可能已经达到限制，或者是指向同一 Host 的请求也达到限制了，
+  // 所以 promoteAndExecute()方法就用于从待执行列表 readyAsyncCalls 中获取当前符合运行条件的所有请求，
+  // 将请求存到 runningAsyncCalls 中，并调用线程池来执行
   private fun promoteAndExecute(): Boolean {
     this.assertThreadDoesntHoldLock()
 
@@ -168,17 +180,23 @@ class Dispatcher constructor() {
       while (i.hasNext()) {
         val asyncCall = i.next()
 
+        // 如果当前正在执行的异步请求总数已经超出限制，则直接返回
         if (runningAsyncCalls.size >= this.maxRequests) break // Max capacity.
+        // 如果指向同个 Host 的请求总数已经超出限制，则取下一个请求
         if (asyncCall.callsPerHost.get() >= this.maxRequestsPerHost) continue // Host max capacity.
 
         i.remove()
+        // 将当前asyncCall的 callsPerHost 递增加一，表示指向该 Host 的链接数加一了
         asyncCall.callsPerHost.incrementAndGet()
+        // 将当前asyncCall的 asyncCall 存到可执行列表中
         executableCalls.add(asyncCall)
+        // 将当前asyncCall的 asyncCall 存到正在执行列表中
         runningAsyncCalls.add(asyncCall)
       }
       isRunning = runningCallsCount() > 0
     }
 
+    // 执行所有符合条件的请求
     for (i in 0 until executableCalls.size) {
       val asyncCall = executableCalls[i]
       asyncCall.executeOn(executorService)
@@ -209,7 +227,7 @@ class Dispatcher constructor() {
       if (!calls.remove(call)) throw AssertionError("Call wasn't in-flight!")
       idleCallback = this.idleCallback
     }
-
+    // 判断是否有需要处理的网络请求，有的话则启动
     val isRunning = promoteAndExecute()
 
     if (!isRunning && idleCallback != null) {

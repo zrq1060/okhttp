@@ -33,7 +33,7 @@ import okhttp3.MediaType
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Protocol
-import okhttp3.Request
+import okhttp3.test.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.curl.Main.Companion.NAME
 import okhttp3.internal.format

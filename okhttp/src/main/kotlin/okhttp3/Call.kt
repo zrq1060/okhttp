@@ -24,6 +24,7 @@ import okio.Timeout
  */
 interface Call : Cloneable {
   /** Returns the original request that initiated this call. */
+  //返回本次网络请求的 Request 对象
   fun request(): Request
 
   /**
@@ -52,6 +53,7 @@ interface Call : Cloneable {
    * @throws IllegalStateException when the call has already been executed.
    */
   @Throws(IOException::class)
+  //发起同步请求，可能会抛出异常
   fun execute(): Response
 
   /**
@@ -65,17 +67,21 @@ interface Call : Cloneable {
    *
    * @throws IllegalStateException when the call has already been executed.
    */
+  //发起异步请求，通过 Callback 来回调最终结果
   fun enqueue(responseCallback: Callback)
 
   /** Cancels the request, if possible. Requests that are already complete cannot be canceled. */
+  //取消网络请求
   fun cancel()
 
   /**
    * Returns true if this call has been either [executed][execute] or [enqueued][enqueue]. It is an
    * error to execute a call more than once.
    */
+  //是否已经发起过请求
   fun isExecuted(): Boolean
 
+  //是否已经取消请求
   fun isCanceled(): Boolean
 
   /**
@@ -85,12 +91,14 @@ interface Call : Cloneable {
    *
    * Configure the client's default timeout with [OkHttpClient.Builder.callTimeout].
    */
+  //超时计算
   fun timeout(): Timeout
 
   /**
    * Create a new, identical call to this one which can be enqueued or executed even if this call
    * has already been.
    */
+  //同个 Call 不允许重复发起请求，想要再次发起请求可以通过此方法得到一个新的 Call 对象
   public override fun clone(): Call
 
   fun interface Factory {

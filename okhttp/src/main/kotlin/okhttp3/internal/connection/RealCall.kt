@@ -146,14 +146,18 @@ class RealCall(
   override fun isCanceled(): Boolean = canceled
 
   override fun execute(): Response {
+    // 判读是否重复请求
     check(executed.compareAndSet(false, true)) { "Already Executed" }
 
     timeout.enter()
     callStart()
     try {
+      // 将自身加入到 dispatcher 中，并在请求结束时从 dispatcher 中移除自身
       client.dispatcher.executed(this)
+      // 通过 getResponseWithInterceptorChain 方法得到 Response 对象
       return getResponseWithInterceptorChain()
     } finally {
+      // 从 dispatcher 中移除
       client.dispatcher.finished(this)
     }
   }
@@ -162,6 +166,7 @@ class RealCall(
     check(executed.compareAndSet(false, true)) { "Already Executed" }
 
     callStart()
+    // 将外部传入的 Callback 包装为一个 AsyncCall 对象后传给 dispatcher
     client.dispatcher.enqueue(AsyncCall(responseCallback))
   }
 
@@ -176,14 +181,21 @@ class RealCall(
   internal fun getResponseWithInterceptorChain(): Response {
     // Build a full stack of interceptors.
     val interceptors = mutableListOf<Interceptor>()
+    // 添加开发者设置的拦截器
     interceptors += client.interceptors
+    // 负责失败重试以及重定向
     interceptors += RetryAndFollowUpInterceptor(client)
+    // 负责对用户构造的 Request 进行转换，添加必要的 header 和 cookie，在得到 response 后如果有需要的会进行 gzip 解压
     interceptors += BridgeInterceptor(client.cookieJar)
+    // 缓存相关的过滤器，负责读取缓存直接返回、更新缓存
     interceptors += CacheInterceptor(client.cache)
+    // 负责和服务器建立连接，这里才是真正的请求网络
     interceptors += ConnectInterceptor
     if (!forWebSocket) {
+      // 如果不是 WebSocket 的话，那就再添加开发者设置的 NetworkInterceptors
       interceptors += client.networkInterceptors
     }
+    // 执行流操作(写出请求体、获得响应数据) 负责向服务器发送请求数据、从服务器读取响应数据 进行http请求报文的封装与请求报文的解析
     interceptors += CallServerInterceptor(forWebSocket)
 
     val chain = RealInterceptorChain(
@@ -468,6 +480,8 @@ class RealCall(
 
   internal fun redactedUrl(): String = originalRequest.url.redact()
 
+  // AsyncCall 是 RealCall 的非静态内部类，所以 AsyncCall 可以访问到 RealCall 的所有变量和方法。
+  // 此外，AsyncCall 继承了 Runnable 接口，其 executeOn 方法就用于传入一个线程池对象来执行run 方法
   inner class AsyncCall(
     private val responseCallback: Callback
   ) : Runnable {
@@ -509,7 +523,8 @@ class RealCall(
         }
       }
     }
-
+    // run 方法内还是调用了 getResponseWithInterceptorChain()方法来获取 response，
+    // 并通过 Callback 来将执行结果（不管成功还是失败）回调出去，在请求结束后也会将自身从 dispatcher 中移除（在enqueue时进行了增加）
     override fun run() {
       threadName("OkHttp ${redactedUrl()}") {
         var signalledCallback = false

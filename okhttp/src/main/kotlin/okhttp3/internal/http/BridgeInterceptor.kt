@@ -37,51 +37,69 @@ class BridgeInterceptor(private val cookieJar: CookieJar) : Interceptor {
   override fun intercept(chain: Interceptor.Chain): Response {
     val userRequest = chain.request()
     val requestBuilder = userRequest.newBuilder()
+    // Content-Type：报文主体内容类型
+    // Content-Length：实体主体的大小（单位：字节）
+    // Transfer-Encoding：规定了传输报文主体时采用的编码方式
+    // Host：请求资源所在服务器，段在 HTTP/1.1 规范内是唯一一个必须被包含在请求内的首部字段
+    // Connection：管理持久连接
+    // User-Agent：HTTP 客户端程序的信息
 
     val body = userRequest.body
     if (body != null) {
+      // body不为空
       val contentType = body.contentType()
       if (contentType != null) {
+        // contentType不为空，添加Content-Type参数
         requestBuilder.header("Content-Type", contentType.toString())
       }
 
       val contentLength = body.contentLength()
       if (contentLength != -1L) {
+        // contentLength有值，添加Content-Length参数
         requestBuilder.header("Content-Length", contentLength.toString())
         requestBuilder.removeHeader("Transfer-Encoding")
       } else {
+        // 分块传输
         requestBuilder.header("Transfer-Encoding", "chunked")
         requestBuilder.removeHeader("Content-Length")
       }
     }
 
     if (userRequest.header("Host") == null) {
+      // Host为null增加Host参数
       requestBuilder.header("Host", userRequest.url.toHostHeader())
     }
 
     if (userRequest.header("Connection") == null) {
+      // 默认支持Keep-Alive
       requestBuilder.header("Connection", "Keep-Alive")
     }
 
     // If we add an "Accept-Encoding: gzip" header field we're responsible for also decompressing
     // the transfer stream.
     var transparentGzip = false
+    // 如果没有Accept-Encoding，则添加默认值，告诉服务器客户端可以接受gzip压缩数据
     if (userRequest.header("Accept-Encoding") == null && userRequest.header("Range") == null) {
       transparentGzip = true
       requestBuilder.header("Accept-Encoding", "gzip")
     }
 
+    // 获取本地存储的cookie
     val cookies = cookieJar.loadForRequest(userRequest.url)
     if (cookies.isNotEmpty()) {
+      // cookies不等于空添加到头部
       requestBuilder.header("Cookie", cookieHeader(cookies))
     }
 
     if (userRequest.header("User-Agent") == null) {
+      // 增加用户标识信息
       requestBuilder.header("User-Agent", userAgent)
     }
 
+    // 进行请求
     val networkResponse = chain.proceed(requestBuilder.build())
 
+    // 存储服务端返回的coockie
     cookieJar.receiveHeaders(userRequest.url, networkResponse.headers)
 
     val responseBuilder = networkResponse.newBuilder()
@@ -99,10 +117,11 @@ class BridgeInterceptor(private val cookieJar: CookieJar) : Interceptor {
             .build()
         responseBuilder.headers(strippedHeaders)
         val contentType = networkResponse.header("Content-Type")
-        responseBuilder.body(RealResponseBody(contentType, -1L, gzipSource.buffer()))
+        responseBuilder.body(RealResponseBody(contentType, -1L, gzipSource.buffer()))//进行gzip解压还原数据
       }
     }
 
+    // 返回结果
     return responseBuilder.build()
   }
 

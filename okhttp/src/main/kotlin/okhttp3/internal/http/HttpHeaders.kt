@@ -199,12 +199,12 @@ private fun Buffer.readToken(): String? {
 }
 
 fun CookieJar.receiveHeaders(url: HttpUrl, headers: Headers) {
-  if (this === CookieJar.NO_COOKIES) return
+  if (this === CookieJar.NO_COOKIES) return // 默认不存储
 
-  val cookies = Cookie.parseAll(url, headers)
+  val cookies = Cookie.parseAll(url, headers) // 将headers中的cookie解析为Cookie对象
   if (cookies.isEmpty()) return
 
-  saveFromResponse(url, cookies)
+  saveFromResponse(url, cookies)//触发存储逻辑
 }
 
 /**
