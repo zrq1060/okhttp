@@ -41,7 +41,7 @@ class Exchange(
   internal val call: RealCall,
   internal val eventListener: EventListener,
   internal val finder: ExchangeFinder,
-  private val codec: ExchangeCodec
+  private val codec: ExchangeCodec,
 ) {
   /** True if the request body need not complete before the response body starts. */
   internal var isDuplex: Boolean = false
@@ -51,10 +51,11 @@ class Exchange(
   internal var hasFailure: Boolean = false
     private set
 
-  internal val connection: RealConnection = codec.connection
+  internal val connection: RealConnection
+    get() = codec.carrier as? RealConnection ?: error("no connection for CONNECT tunnels")
 
   internal val isCoalescedConnection: Boolean
-    get() = finder.address.url.host != connection.route().address.url.host
+    get() = finder.routePlanner.address.url.host != codec.carrier.route.address.url.host
 
   @Throws(IOException::class)
   fun writeRequestHeaders(request: Request) {
@@ -70,7 +71,10 @@ class Exchange(
   }
 
   @Throws(IOException::class)
-  fun createRequestBody(request: Request, duplex: Boolean): Sink {
+  fun createRequestBody(
+    request: Request,
+    duplex: Boolean,
+  ): Sink {
     this.isDuplex = duplex
     val contentLength = request.body!!.contentLength()
     eventListener.requestBodyStart(call)
@@ -142,7 +146,7 @@ class Exchange(
   @Throws(SocketException::class)
   fun newWebSocketStreams(): RealWebSocket.Streams {
     call.timeoutEarlyExit()
-    return codec.connection.newWebSocketStreams(this)
+    return (codec.carrier as RealConnection).newWebSocketStreams(this)
   }
 
   fun webSocketUpgradeFailed() {
@@ -150,7 +154,7 @@ class Exchange(
   }
 
   fun noNewExchangesOnConnection() {
-    codec.connection.noNewExchanges()
+    codec.carrier.noNewExchanges()
   }
 
   fun cancel() {
@@ -168,15 +172,14 @@ class Exchange(
 
   private fun trackFailure(e: IOException) {
     hasFailure = true
-    finder.trackFailure(e)
-    codec.connection.trackFailure(call, e)
+    codec.carrier.trackFailure(call, e)
   }
 
   fun <E : IOException?> bodyComplete(
     bytesRead: Long,
     responseDone: Boolean,
     requestDone: Boolean,
-    e: E
+    e: E,
   ): E {
     if (e != null) {
       trackFailure(e)
@@ -206,18 +209,22 @@ class Exchange(
   private inner class RequestBodySink(
     delegate: Sink,
     /** The exact number of bytes to be written, or -1L if that is unknown. */
-    private val contentLength: Long
+    private val contentLength: Long,
   ) : ForwardingSink(delegate) {
     private var completed = false
     private var bytesReceived = 0L
     private var closed = false
 
     @Throws(IOException::class)
-    override fun write(source: Buffer, byteCount: Long) {
+    override fun write(
+      source: Buffer,
+      byteCount: Long,
+    ) {
       check(!closed) { "closed" }
       if (contentLength != -1L && bytesReceived + byteCount > contentLength) {
         throw ProtocolException(
-            "expected $contentLength bytes but received ${bytesReceived + byteCount}")
+          "expected $contentLength bytes but received ${bytesReceived + byteCount}",
+        )
       }
       try {
         super.write(source, byteCount)
@@ -261,7 +268,7 @@ class Exchange(
   /** A response body that fires events when it completes. */
   internal inner class ResponseBodySource(
     delegate: Source,
-    private val contentLength: Long
+    private val contentLength: Long,
   ) : ForwardingSource(delegate) {
     private var bytesReceived = 0L
     private var invokeStartEvent = true
@@ -275,7 +282,10 @@ class Exchange(
     }
 
     @Throws(IOException::class)
-    override fun read(sink: Buffer, byteCount: Long): Long {
+    override fun read(
+      sink: Buffer,
+      byteCount: Long,
+    ): Long {
       check(!closed) { "closed" }
       try {
         val read = delegate.read(sink, byteCount)

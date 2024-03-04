@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2014 Square, Inc.
+ * Copyright (c) 2022 Square, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,7 +15,7 @@
  */
 package okhttp3
 
-import java.io.IOException
+import okio.IOException
 import okio.Timeout
 
 /**

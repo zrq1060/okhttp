@@ -16,10 +16,11 @@
 package okhttp3
 
 import com.oracle.svm.core.annotate.AutomaticFeature
+import java.io.File
+import java.lang.IllegalStateException
 import org.graalvm.nativeimage.hosted.Feature
 import org.graalvm.nativeimage.hosted.RuntimeClassInitialization
 import org.graalvm.nativeimage.hosted.RuntimeReflection
-import java.io.File
 
 @AutomaticFeature
 class TestRegistration : Feature {
@@ -39,7 +40,10 @@ class TestRegistration : Feature {
     registerParamProvider(access, "okhttp3.WebPlatformUrlTest\$TestDataParamProvider")
   }
 
-  private fun registerParamProvider(access: Feature.BeforeAnalysisAccess, provider: String) {
+  private fun registerParamProvider(
+    access: Feature.BeforeAnalysisAccess,
+    provider: String,
+  ) {
     val providerClass = access.findClassByName(provider)
     if (providerClass != null) {
       registerTest(access, providerClass)
@@ -51,14 +55,15 @@ class TestRegistration : Feature {
   private fun registerJupiterClasses(access: Feature.BeforeAnalysisAccess) {
     registerStandardClass(access, "org.junit.jupiter.params.ParameterizedTestExtension")
     registerStandardClass(access, "org.junit.platform.console.tasks.TreePrintingListener")
-    registerStandardClass(access,
-      "org.junit.jupiter.engine.extension.TimeoutExtension\$ExecutorResource")
   }
 
-  private fun registerStandardClass(access: Feature.BeforeAnalysisAccess, name: String) {
-    val listener = access.findClassByName(name)
-    RuntimeReflection.register(listener)
-    listener.declaredConstructors.forEach {
+  private fun registerStandardClass(
+    access: Feature.BeforeAnalysisAccess,
+    name: String,
+  ) {
+    val clazz: Class<*> = access.findClassByName(name) ?: throw IllegalStateException("Missing class $name")
+    RuntimeReflection.register(clazz)
+    clazz.declaredConstructors.forEach {
       RuntimeReflection.register(it)
     }
   }
@@ -82,7 +87,10 @@ class TestRegistration : Feature {
     }
   }
 
-  private fun registerTest(access: Feature.BeforeAnalysisAccess, java: Class<*>) {
+  private fun registerTest(
+    access: Feature.BeforeAnalysisAccess,
+    java: Class<*>,
+  ) {
     access.registerAsUsed(java)
     RuntimeReflection.register(java)
     java.constructors.forEach {

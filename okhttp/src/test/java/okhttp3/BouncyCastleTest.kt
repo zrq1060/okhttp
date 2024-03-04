@@ -15,23 +15,27 @@
  */
 package okhttp3
 
+import assertk.assertThat
+import assertk.assertions.isEqualTo
 import mockwebserver3.MockWebServer
 import okhttp3.TestUtil.assumeNetwork
 import okhttp3.testing.PlatformRule
-import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.extension.RegisterExtension
 
-class BouncyCastleTest(
-  val server: MockWebServer
-) {
-  @JvmField @RegisterExtension var platform = PlatformRule()
-  @JvmField @RegisterExtension val clientTestRule = OkHttpClientTestRule()
+class BouncyCastleTest {
+  @JvmField @RegisterExtension
+  var platform = PlatformRule()
+
+  @JvmField @RegisterExtension
+  val clientTestRule = OkHttpClientTestRule()
   var client = clientTestRule.newClient()
+  private lateinit var server: MockWebServer
 
   @BeforeEach
-  fun setUp() {
+  fun setUp(server: MockWebServer) {
+    this.server = server
     OkHttpDebugLogging.enable("org.bouncycastle.jsse")
     platform.assumeBouncyCastle()
   }
@@ -44,7 +48,7 @@ class BouncyCastleTest(
 
     client.newCall(request).execute().use {
       assertThat(it.protocol).isEqualTo(Protocol.HTTP_2)
-      assertThat(it.handshake!!.tlsVersion).isEqualTo(TlsVersion.TLS_1_2)
+      assertThat(it.handshake!!.tlsVersion).isEqualTo(TlsVersion.TLS_1_3)
     }
   }
 }

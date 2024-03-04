@@ -16,31 +16,90 @@
 package okhttp3
 
 import java.net.URL
+import kotlin.reflect.KClass
+import kotlin.reflect.cast
+import okhttp3.Headers.Companion.headersOf
 import okhttp3.HttpUrl.Companion.toHttpUrl
-import okhttp3.internal.EMPTY_REQUEST
-import okhttp3.internal.http.HttpMethod
-import okhttp3.internal.toImmutableMap
+import okhttp3.internal.canonicalUrl
+import okhttp3.internal.commonAddHeader
+import okhttp3.internal.commonCacheControl
+import okhttp3.internal.commonDelete
+import okhttp3.internal.commonEmptyRequestBody
+import okhttp3.internal.commonGet
+import okhttp3.internal.commonHead
+import okhttp3.internal.commonHeader
+import okhttp3.internal.commonHeaders
+import okhttp3.internal.commonMethod
+import okhttp3.internal.commonPatch
+import okhttp3.internal.commonPost
+import okhttp3.internal.commonPut
+import okhttp3.internal.commonRemoveHeader
+import okhttp3.internal.commonTag
+import okhttp3.internal.commonToString
 
 /**
  * An HTTP request. Instances of this class are immutable if their [body] is null or itself
  * immutable.
  */
-class Request internal constructor(
-  @get:JvmName("url") val url: HttpUrl,
-  @get:JvmName("method") val method: String,
-  @get:JvmName("headers") val headers: Headers,
-  @get:JvmName("body") val body: RequestBody?,
-  internal val tags: Map<Class<*>, Any>
-) {
+class Request internal constructor(builder: Builder) {
+  @get:JvmName("url")
+  val url: HttpUrl = checkNotNull(builder.url) { "url == null" }
 
-  private var lazyCacheControl: CacheControl? = null
+  @get:JvmName("method")
+  val method: String = builder.method
+
+  @get:JvmName("headers")
+  val headers: Headers = builder.headers.build()
+
+  @get:JvmName("body")
+  val body: RequestBody? = builder.body
+
+  internal val tags: Map<KClass<*>, Any> = builder.tags.toMap()
+
+  internal var lazyCacheControl: CacheControl? = null
 
   val isHttps: Boolean
     get() = url.isHttps
 
-  fun header(name: String): String? = headers[name]
+  /**
+   * Constructs a new request.
+   *
+   * Use [Builder] for more fluent construction, including helper methods for various HTTP methods.
+   *
+   * @param method defaults to "GET" if [body] is null, and "POST" otherwise.
+   */
+  @ExperimentalOkHttpApi
+  constructor(
+    url: HttpUrl,
+    headers: Headers = headersOf(),
+    // '\u0000' is a sentinel value that'll choose based on what the body is:
+    method: String = "\u0000",
+    body: RequestBody? = null,
+  ) : this(
+    Builder()
+      .url(url)
+      .headers(headers)
+      .method(
+        when {
+          method != "\u0000" -> method
+          body != null -> "POST"
+          else -> "GET"
+        },
+        body,
+      ),
+  )
 
-  fun headers(name: String): List<String> = headers.values(name)
+  fun header(name: String): String? = commonHeader(name)
+
+  fun headers(name: String): List<String> = commonHeaders(name)
+
+  /** Returns the tag attached with [T] as a key, or null if no tag is attached with that key. */
+  @JvmName("reifiedTag")
+  inline fun <reified T : Any> tag(): T? = tag(T::class)
+
+  /** Returns the tag attached with [type] as a key, or null if no tag is attached with that key. */
+  @ExperimentalOkHttpApi
+  fun <T : Any> tag(type: KClass<T>): T? = type.java.cast(tags[type])
 
   /**
    * Returns the tag attached with `Object.class` as a key, or null if no tag is attached with
@@ -49,14 +108,16 @@ class Request internal constructor(
    * Prior to OkHttp 3.11, this method never returned null if no tag was attached. Instead it
    * returned either this request, or the request upon which this request was derived with
    * [newBuilder].
+   *
+   * @suppress this method breaks Dokka! https://github.com/Kotlin/dokka/issues/2473
    */
-  fun tag(): Any? = tag(Any::class.java)
+  fun tag(): Any? = tag<Any>()
 
   /**
    * Returns the tag attached with [type] as a key, or null if no tag is attached with that
    * key.
    */
-  fun <T> tag(type: Class<out T>): T? = type.cast(tags[type])
+  fun <T> tag(type: Class<out T>): T? = tag(type.kotlin)
 
   fun newBuilder(): Builder = Builder(this)
 
@@ -64,7 +125,8 @@ class Request internal constructor(
    * Returns the cache control directives for this response. This is never null, even if this
    * response contains no `Cache-Control` header.
    */
-  @get:JvmName("cacheControl") val cacheControl: CacheControl
+  @get:JvmName("cacheControl")
+  val cacheControl: CacheControl
     get() {
       var result = lazyCacheControl
       if (result == null) {
@@ -76,62 +138,45 @@ class Request internal constructor(
 
   @JvmName("-deprecated_url")
   @Deprecated(
-      message = "moved to val",
-      replaceWith = ReplaceWith(expression = "url"),
-      level = DeprecationLevel.ERROR)
+    message = "moved to val",
+    replaceWith = ReplaceWith(expression = "url"),
+    level = DeprecationLevel.ERROR,
+  )
   fun url(): HttpUrl = url
 
   @JvmName("-deprecated_method")
   @Deprecated(
-      message = "moved to val",
-      replaceWith = ReplaceWith(expression = "method"),
-      level = DeprecationLevel.ERROR)
+    message = "moved to val",
+    replaceWith = ReplaceWith(expression = "method"),
+    level = DeprecationLevel.ERROR,
+  )
   fun method(): String = method
 
   @JvmName("-deprecated_headers")
   @Deprecated(
-      message = "moved to val",
-      replaceWith = ReplaceWith(expression = "headers"),
-      level = DeprecationLevel.ERROR)
+    message = "moved to val",
+    replaceWith = ReplaceWith(expression = "headers"),
+    level = DeprecationLevel.ERROR,
+  )
   fun headers(): Headers = headers
 
   @JvmName("-deprecated_body")
   @Deprecated(
-      message = "moved to val",
-      replaceWith = ReplaceWith(expression = "body"),
-      level = DeprecationLevel.ERROR)
+    message = "moved to val",
+    replaceWith = ReplaceWith(expression = "body"),
+    level = DeprecationLevel.ERROR,
+  )
   fun body(): RequestBody? = body
 
   @JvmName("-deprecated_cacheControl")
   @Deprecated(
-      message = "moved to val",
-      replaceWith = ReplaceWith(expression = "cacheControl"),
-      level = DeprecationLevel.ERROR)
+    message = "moved to val",
+    replaceWith = ReplaceWith(expression = "cacheControl"),
+    level = DeprecationLevel.ERROR,
+  )
   fun cacheControl(): CacheControl = cacheControl
 
-  override fun toString(): String = buildString {
-    append("Request{method=")
-    append(method)
-    append(", url=")
-    append(url)
-    if (headers.size != 0) {
-      append(", headers=[")
-      headers.forEachIndexed { index, (name, value) ->
-        if (index > 0) {
-          append(", ")
-        }
-        append(name)
-        append(':')
-        append(value)
-      }
-      append(']')
-    }
-    if (tags.isNotEmpty()) {
-      append(", tags=")
-      append(tags)
-    }
-    append('}')
-  }
+  override fun toString(): String = commonToString()
 
   open class Builder {
     internal var url: HttpUrl? = null // 即本次的网络请求地址以及可能包含的 query 键值对
@@ -140,7 +185,8 @@ class Request internal constructor(
     internal var body: RequestBody? = null // 请求体
 
     /** A mutable map of tags, or an immutable empty map if we don't have any. */
-    internal var tags: MutableMap<Class<*>, Any> = mutableMapOf() // 可用来唯一标识本次请求
+    // 可用来唯一标识本次请求
+    internal var tags = mapOf<KClass<*>, Any>()
 
     constructor() {
       this.method = "GET"
@@ -151,17 +197,18 @@ class Request internal constructor(
       this.url = request.url
       this.method = request.method
       this.body = request.body
-      this.tags = if (request.tags.isEmpty()) {
-        mutableMapOf()
-      } else {
-        request.tags.toMutableMap()
-      }
+      this.tags =
+        when {
+          request.tags.isEmpty() -> mapOf()
+          else -> request.tags.toMutableMap()
+        }
       this.headers = request.headers.newBuilder()
     }
 
-    open fun url(url: HttpUrl): Builder = apply {
-      this.url = url
-    }
+    open fun url(url: HttpUrl): Builder =
+      apply {
+        this.url = url
+      }
 
     /**
      * Sets the URL target of this request.
@@ -170,18 +217,7 @@ class Request internal constructor(
      *     exception by calling [HttpUrl.parse]; it returns null for invalid URLs.
      */
     open fun url(url: String): Builder {
-      // Silently replace web socket URLs with HTTP URLs.
-      val finalUrl: String = when {
-        url.startsWith("ws:", ignoreCase = true) -> {
-          "http:${url.substring(3)}"
-        }
-        url.startsWith("wss:", ignoreCase = true) -> {
-          "https:${url.substring(4)}"
-        }
-        else -> url
-      }
-
-      return url(finalUrl.toHttpUrl())
+      return url(canonicalUrl(url).toHttpUrl())
     }
 
     /**
@@ -195,9 +231,10 @@ class Request internal constructor(
      * Sets the header named [name] to [value]. If this request already has any headers
      * with that name, they are all replaced.
      */
-    open fun header(name: String, value: String) = apply {
-      headers[name] = value
-    }
+    open fun header(
+      name: String,
+      value: String,
+    ) = commonHeader(name, value)
 
     /**
      * Adds a header with [name] and [value]. Prefer this method for multiply-valued
@@ -206,65 +243,67 @@ class Request internal constructor(
      * Note that for some headers including `Content-Length` and `Content-Encoding`,
      * OkHttp may replace [value] with a header derived from the request body.
      */
-    open fun addHeader(name: String, value: String) = apply {
-      headers.add(name, value)
-    }
+    open fun addHeader(
+      name: String,
+      value: String,
+    ) = commonAddHeader(name, value)
 
     /** Removes all headers named [name] on this builder. */
-    open fun removeHeader(name: String) = apply {
-      headers.removeAll(name)
-    }
+    open fun removeHeader(name: String) = commonRemoveHeader(name)
 
     /** Removes all headers on this builder and adds [headers]. */
-    open fun headers(headers: Headers) = apply {
-      this.headers = headers.newBuilder()
-    }
+    open fun headers(headers: Headers) = commonHeaders(headers)
 
     /**
      * Sets this request's `Cache-Control` header, replacing any cache control headers already
      * present. If [cacheControl] doesn't define any directives, this clears this request's
      * cache-control headers.
      */
-    open fun cacheControl(cacheControl: CacheControl): Builder {
-      val value = cacheControl.toString()
-      return when {
-        value.isEmpty() -> removeHeader("Cache-Control")
-        else -> header("Cache-Control", value)
-      }
-    }
+    open fun cacheControl(cacheControl: CacheControl): Builder = commonCacheControl(cacheControl)
 
-    open fun get(): Builder = method("GET", null)
+    open fun get(): Builder = commonGet()
 
-    open fun head(): Builder = method("HEAD", null)
+    open fun head(): Builder = commonHead()
 
-    open fun post(body: RequestBody): Builder = method("POST", body)
+    open fun post(body: RequestBody): Builder = commonPost(body)
 
     @JvmOverloads
-    open fun delete(body: RequestBody? = EMPTY_REQUEST): Builder = method("DELETE", body)
+    open fun delete(body: RequestBody? = commonEmptyRequestBody): Builder = commonDelete(body)
 
-    open fun put(body: RequestBody): Builder = method("PUT", body)
+    open fun put(body: RequestBody): Builder = commonPut(body)
 
-    open fun patch(body: RequestBody): Builder = method("PATCH", body)
+    open fun patch(body: RequestBody): Builder = commonPatch(body)
 
-    open fun method(method: String, body: RequestBody?): Builder = apply {
-      require(method.isNotEmpty()) {
-        "method.isEmpty() == true"
-      }
-      if (body == null) {
-        require(!HttpMethod.requiresRequestBody(method)) {
-          "method $method must have a request body."
-        }
-      } else {
-        require(HttpMethod.permitsRequestBody(method)) {
-          "method $method must not have a request body."
-        }
-      }
-      this.method = method
-      this.body = body
-    }
+    open fun method(
+      method: String,
+      body: RequestBody?,
+    ): Builder = commonMethod(method, body)
+
+    /**
+     * Attaches [tag] to the request using [T] as a key. Tags can be read from a request using
+     * [Request.tag]. Use null to remove any existing tag assigned for [T].
+     *
+     * Use this API to attach timing, debugging, or other application data to a request so that
+     * you may read it in interceptors, event listeners, or callbacks.
+     */
+    @JvmName("reifiedTag")
+    inline fun <reified T : Any> tag(tag: T?): Builder = tag(T::class, tag)
+
+    /**
+     * Attaches [tag] to the request using [type] as a key. Tags can be read from a request using
+     * [Request.tag]. Use null to remove any existing tag assigned for [type].
+     *
+     * Use this API to attach timing, debugging, or other application data to a request so that
+     * you may read it in interceptors, event listeners, or callbacks.
+     */
+    @ExperimentalOkHttpApi
+    fun <T : Any> tag(
+      type: KClass<T>,
+      tag: T?,
+    ): Builder = commonTag(type, type.cast(tag))
 
     /** Attaches [tag] to the request using `Object.class` as a key. */
-    open fun tag(tag: Any?): Builder = tag(Any::class.java, tag)
+    open fun tag(tag: Any?): Builder = commonTag(Any::class, tag)
 
     /**
      * Attaches [tag] to the request using [type] as a key. Tags can be read from a
@@ -273,25 +312,11 @@ class Request internal constructor(
      * Use this API to attach timing, debugging, or other application data to a request so that
      * you may read it in interceptors, event listeners, or callbacks.
      */
-    open fun <T> tag(type: Class<in T>, tag: T?) = apply {
-      if (tag == null) {
-        tags.remove(type)
-      } else {
-        if (tags.isEmpty()) {
-          tags = mutableMapOf()
-        }
-        tags[type] = type.cast(tag)!! // Force-unwrap due to lack of contracts on Class#cast()
-      }
-    }
+    open fun <T> tag(
+      type: Class<in T>,
+      tag: T?,
+    ) = commonTag(type.kotlin, tag)
 
-    open fun build(): Request {
-      return Request(
-          checkNotNull(url) { "url == null" },
-          method,
-          headers.build(),
-          body,
-          tags.toImmutableMap()
-      )
-    }
+    open fun build(): Request = Request(this)
   }
 }

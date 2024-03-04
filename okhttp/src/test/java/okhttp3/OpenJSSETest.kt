@@ -15,7 +15,10 @@
  */
 package okhttp3
 
-import java.net.InetAddress
+import assertk.assertThat
+import assertk.assertions.isEqualTo
+import assertk.assertions.isInstanceOf
+import assertk.assertions.isNotNull
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
 import okhttp3.TestUtil.assumeNetwork
@@ -25,7 +28,6 @@ import okhttp3.internal.platform.OpenJSSEPlatform
 import okhttp3.testing.PlatformRule
 import okhttp3.tls.HandshakeCertificates
 import okhttp3.tls.HeldCertificate
-import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Disabled
@@ -34,16 +36,20 @@ import org.junit.jupiter.api.extension.RegisterExtension
 import org.openjsse.sun.security.ssl.SSLSocketFactoryImpl
 import org.openjsse.sun.security.ssl.SSLSocketImpl
 
-class OpenJSSETest(
-  val server: MockWebServer
-) {
-  @JvmField @RegisterExtension var platform = PlatformRule()
-  @JvmField @RegisterExtension val clientTestRule = OkHttpClientTestRule()
+class OpenJSSETest {
+  @JvmField @RegisterExtension
+  var platform = PlatformRule()
+
+  @JvmField @RegisterExtension
+  val clientTestRule = OkHttpClientTestRule()
 
   var client = clientTestRule.newClient()
 
+  private lateinit var server: MockWebServer
+
   @BeforeEach
-  fun setUp() {
+  fun setUp(server: MockWebServer) {
+    this.server = server
     platform.assumeOpenJSSE()
   }
 
@@ -51,9 +57,9 @@ class OpenJSSETest(
   fun testTlsv13Works() {
     enableTls()
 
-    server.enqueue(MockResponse().setBody("abc"))
+    server.enqueue(MockResponse(body = "abc"))
 
-    val request = Request.Builder().url(server.url("/")).build()
+    val request = Request(server.url("/"))
 
     val response = client.newCall(request).execute()
 
@@ -62,7 +68,8 @@ class OpenJSSETest(
       assertEquals(TlsVersion.TLS_1_3, response.handshake?.tlsVersion)
       assertEquals(Protocol.HTTP_2, response.protocol)
 
-      assertThat(response.exchangeAccessor?.connectionAccessor?.socket()).isInstanceOf(SSLSocketImpl::class.java)
+      assertThat(response.exchangeAccessor!!.connectionAccessor.socket())
+        .isInstanceOf<SSLSocketImpl>()
     }
   }
 
@@ -90,25 +97,30 @@ class OpenJSSETest(
   @Test
   fun testBuildIfSupported() {
     val actual = OpenJSSEPlatform.buildIfSupported()
-    assertThat(actual).isNotNull
+    assertThat(actual).isNotNull()
   }
 
   private fun enableTls() {
     // Generate a self-signed cert for the server to serve and the client to trust.
     // can't use TlsUtil.localhost with a non OpenJSSE trust manager
-    val heldCertificate = HeldCertificate.Builder()
+    val heldCertificate =
+      HeldCertificate.Builder()
         .commonName("localhost")
-        .addSubjectAlternativeName(InetAddress.getByName("localhost").canonicalHostName)
+        .addSubjectAlternativeName("localhost")
         .build()
-    val handshakeCertificates = HandshakeCertificates.Builder()
+    val handshakeCertificates =
+      HandshakeCertificates.Builder()
         .heldCertificate(heldCertificate)
         .addTrustedCertificate(heldCertificate.certificate)
         .build()
 
-    client = client.newBuilder()
+    client =
+      client.newBuilder()
         .sslSocketFactory(
-            handshakeCertificates.sslSocketFactory(), handshakeCertificates.trustManager)
+          handshakeCertificates.sslSocketFactory(),
+          handshakeCertificates.trustManager,
+        )
         .build()
-    server.useHttps(handshakeCertificates.sslSocketFactory(), false)
+    server.useHttps(handshakeCertificates.sslSocketFactory())
   }
 }

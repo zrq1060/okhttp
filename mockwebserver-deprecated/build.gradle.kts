@@ -1,8 +1,11 @@
-import com.android.build.gradle.internal.tasks.factory.dependsOn
-import me.champeau.gradle.japicmp.JapicmpTask
+import com.vanniktech.maven.publish.JavadocJar
+import com.vanniktech.maven.publish.KotlinJvm
 
 plugins {
-  id("me.champeau.gradle.japicmp")
+  kotlin("jvm")
+  id("org.jetbrains.dokka")
+  id("com.vanniktech.maven.publish.base")
+  id("binary-compatibility-validator")
 }
 
 tasks.jar {
@@ -12,38 +15,16 @@ tasks.jar {
 }
 
 dependencies {
-  api(project(":okhttp"))
-  api(project(":mockwebserver"))
-  api(Dependencies.junit)
+  api(projects.okhttp)
+  api(projects.mockwebserver3)
+  api(libs.junit)
 
-  testImplementation(project(":okhttp-testing-support"))
-  testImplementation(project(":okhttp-tls"))
-  testImplementation(Dependencies.assertj)
+  testImplementation(projects.okhttpTestingSupport)
+  testImplementation(projects.okhttpTls)
+  testImplementation(libs.kotlin.test.common)
+  testImplementation(libs.kotlin.test.junit)
 }
 
-afterEvaluate {
-  tasks.dokka {
-    outputDirectory = "$rootDir/docs/4.x"
-    outputFormat = "gfm"
-  }
+mavenPublishing {
+  configure(KotlinJvm(javadocJar = JavadocJar.Empty()))
 }
-
-tasks.register<JapicmpTask>("japicmp") {
-  dependsOn("jar")
-  oldClasspath = files(Projects.baselineJar(project))
-  newClasspath = files(tasks.jar.get().archiveFile)
-  isOnlyBinaryIncompatibleModified = true
-  isFailOnModification = true
-  txtOutputFile = file("$buildDir/reports/japi.txt")
-  isIgnoreMissingClasses = true
-  isIncludeSynthetic = true
-  packageExcludes = listOf(
-    "okhttp3.internal.duplex",
-    "okhttp3.mockwebserver.internal",
-    "okhttp3.mockwebserver.internal.duplex",
-  )
-  classExcludes = listOf(
-    // Became "final" in 4.10.0.
-    "okhttp3.mockwebserver.QueueDispatcher"
-  )
-}.let(tasks.check::dependsOn)

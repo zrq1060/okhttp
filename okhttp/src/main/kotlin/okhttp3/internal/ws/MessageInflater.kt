@@ -24,10 +24,16 @@ import okio.InflaterSource
 private const val OCTETS_TO_ADD_BEFORE_INFLATION = 0x0000ffff
 
 class MessageInflater(
-  private val noContextTakeover: Boolean
+  private val noContextTakeover: Boolean,
 ) : Closeable {
   private val deflatedBytes = Buffer()
-  private val inflater = Inflater(true /* omit zlib header */)
+
+  private val inflater =
+    Inflater(
+      // nowrap (omits zlib header):
+      true,
+    )
+
   private val inflaterSource = InflaterSource(deflatedBytes, inflater)
 
   /** Inflates [buffer] in place as described in RFC 7692 section 7.2.2. */
@@ -48,7 +54,7 @@ class MessageInflater(
     // Instead, we ensure that all bytes from source have been processed by inflater.
     do {
       inflaterSource.readOrInflate(buffer, Long.MAX_VALUE)
-    } while (inflater.bytesRead < totalBytesToRead)
+    } while (inflater.bytesRead < totalBytesToRead && !inflater.finished())
   }
 
   @Throws(IOException::class)

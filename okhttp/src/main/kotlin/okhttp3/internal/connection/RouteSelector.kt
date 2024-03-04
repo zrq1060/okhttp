@@ -16,6 +16,7 @@
 package okhttp3.internal.connection
 
 import java.io.IOException
+import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.Proxy
 import java.net.SocketException
@@ -26,6 +27,7 @@ import okhttp3.Call
 import okhttp3.EventListener
 import okhttp3.HttpUrl
 import okhttp3.Route
+import okhttp3.internal.canParseAsIpAddress
 import okhttp3.internal.immutableListOf
 import okhttp3.internal.toImmutableList
 
@@ -37,16 +39,17 @@ class RouteSelector(
   private val address: Address,
   private val routeDatabase: RouteDatabase,
   private val call: Call,
-  private val eventListener: EventListener
+  private val fastFallback: Boolean,
+  private val eventListener: EventListener,
 ) {
-  /* State for negotiating the next proxy to use. */
+  // State for negotiating the next proxy to use.
   private var proxies = emptyList<Proxy>()
   private var nextProxyIndex: Int = 0
 
-  /* State for negotiating the next socket address to use. */
+  // State for negotiating the next socket address to use.
   private var inetSocketAddresses = emptyList<InetSocketAddress>()
 
-  /* State for negotiating failed routes */
+  // State for negotiating failed routes
   private val postponedRoutes = mutableListOf<Route>()
 
   init {
@@ -93,7 +96,10 @@ class RouteSelector(
   }
 
   /** Prepares the proxy servers to try. */
-  private fun resetNextProxy(url: HttpUrl, proxy: Proxy?) {
+  private fun resetNextProxy(
+    url: HttpUrl,
+    proxy: Proxy?,
+  ) {
     fun selectProxies(): List<Proxy> {
       // If the user specifies a proxy, try that and only that.
       if (proxy != null) return listOf(proxy)
@@ -123,7 +129,8 @@ class RouteSelector(
   private fun nextProxy(): Proxy {
     if (!hasNextProxy()) {
       throw SocketException(
-          "No route to ${address.url.host}; exhausted proxy configurations: $proxies")
+        "No route to ${address.url.host}; exhausted proxy configurations: $proxies",
+      )
     }
     val result = proxies[nextProxyIndex++]
     resetNextInetSocketAddress(result)
@@ -158,17 +165,29 @@ class RouteSelector(
     if (proxy.type() == Proxy.Type.SOCKS) {
       mutableInetSocketAddresses += InetSocketAddress.createUnresolved(socketHost, socketPort)
     } else {
-      eventListener.dnsStart(call, socketHost)
+      val addresses =
+        if (socketHost.canParseAsIpAddress()) {
+          listOf(InetAddress.getByName(socketHost))
+        } else {
+          eventListener.dnsStart(call, socketHost)
+
+          val result = address.dns.lookup(socketHost)
+          if (result.isEmpty()) {
+            throw UnknownHostException("${address.dns} returned no addresses for $socketHost")
+          }
+
+          eventListener.dnsEnd(call, socketHost, result)
+          result
+        }
 
       // Try each address for best behavior in mixed IPv4/IPv6 environments.
-      val addresses = address.dns.lookup(socketHost)
-      if (addresses.isEmpty()) {
-        throw UnknownHostException("${address.dns} returned no addresses for $socketHost")
-      }
+      val orderedAddresses =
+        when {
+          fastFallback -> reorderForHappyEyeballs(addresses)
+          else -> addresses
+        }
 
-      eventListener.dnsEnd(call, socketHost, addresses)
-
-      for (inetAddress in addresses) {
+      for (inetAddress in orderedAddresses) {
         mutableInetSocketAddresses += InetSocketAddress(inetAddress, socketPort)
       }
     }

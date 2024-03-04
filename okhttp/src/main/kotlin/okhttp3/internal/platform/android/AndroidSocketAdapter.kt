@@ -15,9 +15,9 @@
  */
 package okhttp3.internal.platform.android
 
+import android.os.Build
 import java.lang.reflect.InvocationTargetException
 import java.lang.reflect.Method
-import java.nio.charset.StandardCharsets
 import javax.net.ssl.SSLSocket
 import okhttp3.Protocol
 import okhttp3.internal.platform.AndroidPlatform
@@ -45,7 +45,7 @@ open class AndroidSocketAdapter(private val sslSocketClass: Class<in SSLSocket>)
   override fun configureTlsExtensions(
     sslSocket: SSLSocket,
     hostname: String?,
-    protocols: List<Protocol>
+    protocols: List<Protocol>,
   ) {
     // No TLS extensions if the socket class is custom.
     if (matchesSocket(sslSocket)) {
@@ -53,15 +53,16 @@ open class AndroidSocketAdapter(private val sslSocketClass: Class<in SSLSocket>)
         // Enable session tickets.
         setUseSessionTickets.invoke(sslSocket, true)
 
-        if (hostname != null) {
+        // Assume platform support on 24+
+        if (hostname != null && Build.VERSION.SDK_INT <= 23) {
           // This is SSLParameters.setServerNames() in API 24+.
           setHostname.invoke(sslSocket, hostname)
         }
 
         // Enable ALPN.
         setAlpnProtocols.invoke(
-            sslSocket,
-            Platform.concatLengthPrefixed(protocols)
+          sslSocket,
+          Platform.concatLengthPrefixed(protocols),
         )
       } catch (e: IllegalAccessException) {
         throw AssertionError(e)
@@ -79,17 +80,16 @@ open class AndroidSocketAdapter(private val sslSocketClass: Class<in SSLSocket>)
 
     return try {
       val alpnResult = getAlpnSelectedProtocol.invoke(sslSocket) as ByteArray?
-      if (alpnResult != null) String(alpnResult, StandardCharsets.UTF_8) else null
-    } catch (e: NullPointerException) {
-      // https://github.com/square/okhttp/issues/5587
-      when (e.message) {
-        "ssl == null" -> null
-        else -> throw e
-      }
+      alpnResult?.toString(Charsets.UTF_8)
     } catch (e: IllegalAccessException) {
       throw AssertionError(e)
     } catch (e: InvocationTargetException) {
-      throw AssertionError(e)
+      // https://github.com/square/okhttp/issues/5587
+      val cause = e.cause
+      when {
+        cause is NullPointerException && cause.message == "ssl == null" -> null
+        else -> throw AssertionError(e)
+      }
     }
   }
 
@@ -110,7 +110,7 @@ open class AndroidSocketAdapter(private val sslSocketClass: Class<in SSLSocket>)
 
         if (possibleClass == null) {
           throw AssertionError(
-              "No OpenSSLSocketImpl superclass of socket of type $actualSSLSocketClass"
+            "No OpenSSLSocketImpl superclass of socket of type $actualSSLSocketClass",
           )
         }
       }
@@ -120,8 +120,7 @@ open class AndroidSocketAdapter(private val sslSocketClass: Class<in SSLSocket>)
 
     fun factory(packageName: String): DeferredSocketAdapter.Factory {
       return object : DeferredSocketAdapter.Factory {
-        override fun matchesSocket(sslSocket: SSLSocket): Boolean =
-          sslSocket.javaClass.name.startsWith("$packageName.")
+        override fun matchesSocket(sslSocket: SSLSocket): Boolean = sslSocket.javaClass.name.startsWith("$packageName.")
 
         override fun create(sslSocket: SSLSocket): SocketAdapter {
           return build(sslSocket.javaClass)

@@ -16,8 +16,12 @@
 package okhttp3
 
 import java.nio.charset.Charset
-import java.util.Locale
-import java.util.regex.Pattern
+import okhttp3.internal.commonEquals
+import okhttp3.internal.commonHashCode
+import okhttp3.internal.commonParameter
+import okhttp3.internal.commonToMediaType
+import okhttp3.internal.commonToMediaTypeOrNull
+import okhttp3.internal.commonToString
 
 /**
  * An [RFC 2045][rfc_2045] Media Type, appropriate to describe the content type of an HTTP request
@@ -25,26 +29,22 @@ import java.util.regex.Pattern
  *
  * [rfc_2045]: http://tools.ietf.org/html/rfc2045
  */
-class MediaType private constructor(
-  private val mediaType: String,
-
+class MediaType internal constructor(
+  internal val mediaType: String,
   /**
    * Returns the high-level media type, such as "text", "image", "audio", "video", or "application".
    */
   @get:JvmName("type") val type: String,
-
   /**
    * Returns a specific media subtype, such as "plain" or "png", "mpeg", "mp4" or "xml".
    */
   @get:JvmName("subtype") val subtype: String,
-
   /** Alternating parameter names with their values, like `["charset", "utf-8"]`. */
-  private val parameterNamesAndValues: Array<String>
+  internal val parameterNamesAndValues: Array<String>,
 ) {
-
   /**
    * Returns the charset of this media type, or [defaultValue] if either this media type doesn't
-   * specify a charset, of it its charset is unsupported by the current runtime.
+   * specify a charset, or if its charset is unsupported by the current runtime.
    */
   @JvmOverloads
   fun charset(defaultValue: Charset? = null): Charset? {
@@ -60,45 +60,35 @@ class MediaType private constructor(
    * Returns the parameter [name] of this media type, or null if this media type does not define
    * such a parameter.
    */
-  fun parameter(name: String): String? {
-    for (i in parameterNamesAndValues.indices step 2) {
-      if (parameterNamesAndValues[i].equals(name, ignoreCase = true)) {
-        return parameterNamesAndValues[i + 1]
-      }
-    }
-    return null
-  }
+  fun parameter(name: String): String? = commonParameter(name)
 
   @JvmName("-deprecated_type")
   @Deprecated(
-      message = "moved to val",
-      replaceWith = ReplaceWith(expression = "type"),
-      level = DeprecationLevel.ERROR)
+    message = "moved to val",
+    replaceWith = ReplaceWith(expression = "type"),
+    level = DeprecationLevel.ERROR,
+  )
   fun type(): String = type
 
   @JvmName("-deprecated_subtype")
   @Deprecated(
-      message = "moved to val",
-      replaceWith = ReplaceWith(expression = "subtype"),
-      level = DeprecationLevel.ERROR)
+    message = "moved to val",
+    replaceWith = ReplaceWith(expression = "subtype"),
+    level = DeprecationLevel.ERROR,
+  )
   fun subtype(): String = subtype
 
   /**
    * Returns the encoded media type, like "text/plain; charset=utf-8", appropriate for use in a
    * Content-Type header.
    */
-  override fun toString(): String = mediaType
+  override fun toString(): String = commonToString()
 
-  override fun equals(other: Any?): Boolean = other is MediaType && other.mediaType == mediaType
+  override fun equals(other: Any?): Boolean = commonEquals(other)
 
-  override fun hashCode(): Int = mediaType.hashCode()
+  override fun hashCode(): Int = commonHashCode()
 
   companion object {
-    private const val TOKEN = "([a-zA-Z0-9-!#$%&'*+.^_`{|}~]+)"
-    private const val QUOTED = "\"([^\"]*)\""
-    private val TYPE_SUBTYPE = Pattern.compile("$TOKEN/$TOKEN")
-    private val PARAMETER = Pattern.compile(";\\s*(?:$TOKEN=(?:$TOKEN|$QUOTED))?")
-
     /**
      * Returns a media type for this string.
      *
@@ -106,75 +96,35 @@ class MediaType private constructor(
      */
     @JvmStatic
     @JvmName("get")
-    fun String.toMediaType(): MediaType {
-      val typeSubtype = TYPE_SUBTYPE.matcher(this)
-      require(typeSubtype.lookingAt()) { "No subtype found for: \"$this\"" }
-      val type = typeSubtype.group(1).lowercase(Locale.US)
-      val subtype = typeSubtype.group(2).lowercase(Locale.US)
-
-      val parameterNamesAndValues = mutableListOf<String>()
-      val parameter = PARAMETER.matcher(this)
-      var s = typeSubtype.end()
-      while (s < length) {
-        parameter.region(s, length)
-        require(parameter.lookingAt()) {
-          "Parameter is not formatted correctly: \"${substring(s)}\" for: \"$this\""
-        }
-
-        val name = parameter.group(1)
-        if (name == null) {
-          s = parameter.end()
-          continue
-        }
-
-        val token = parameter.group(2)
-        val value = when {
-          token == null -> {
-            // Value is "double-quoted". That's valid and our regex group already strips the quotes.
-            parameter.group(3)
-          }
-          token.startsWith("'") && token.endsWith("'") && token.length > 2 -> {
-            // If the token is 'single-quoted' it's invalid! But we're lenient and strip the quotes.
-            token.substring(1, token.length - 1)
-          }
-          else -> token
-        }
-
-        parameterNamesAndValues += name
-        parameterNamesAndValues += value
-        s = parameter.end()
-      }
-
-      return MediaType(this, type, subtype, parameterNamesAndValues.toTypedArray())
-    }
+    fun String.toMediaType(): MediaType = commonToMediaType()
 
     /** Returns a media type for this, or null if this is not a well-formed media type. */
     @JvmStatic
     @JvmName("parse")
-    fun String.toMediaTypeOrNull(): MediaType? {
-      return try {
-        toMediaType()
-      } catch (_: IllegalArgumentException) {
-        null
-      }
-    }
+    fun String.toMediaTypeOrNull(): MediaType? = commonToMediaTypeOrNull()
 
     @JvmName("-deprecated_get")
     @Deprecated(
-        message = "moved to extension function",
-        replaceWith = ReplaceWith(
-            expression = "mediaType.toMediaType()",
-            imports = ["okhttp3.MediaType.Companion.toMediaType"]),
-        level = DeprecationLevel.ERROR)
+      message = "moved to extension function",
+      replaceWith =
+        ReplaceWith(
+          expression = "mediaType.toMediaType()",
+          imports = ["okhttp3.MediaType.Companion.toMediaType"],
+        ),
+      level = DeprecationLevel.ERROR,
+    )
     fun get(mediaType: String): MediaType = mediaType.toMediaType()
 
     @JvmName("-deprecated_parse")
     @Deprecated(
-        message = "moved to extension function",
-        replaceWith = ReplaceWith(
-            expression = "mediaType.toMediaTypeOrNull()",
-            imports = ["okhttp3.MediaType.Companion.toMediaTypeOrNull"]),
-        level = DeprecationLevel.ERROR)
+      message = "moved to extension function",
+      replaceWith =
+        ReplaceWith(
+          expression = "mediaType.toMediaTypeOrNull()",
+          imports = ["okhttp3.MediaType.Companion.toMediaTypeOrNull"],
+        ),
+      level = DeprecationLevel.ERROR,
+    )
     fun parse(mediaType: String): MediaType? = mediaType.toMediaTypeOrNull()
   }
 }

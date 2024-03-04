@@ -1,44 +1,32 @@
-import com.android.build.gradle.internal.tasks.factory.dependsOn
-import me.champeau.gradle.japicmp.JapicmpTask
+import com.vanniktech.maven.publish.JavadocJar
+import com.vanniktech.maven.publish.KotlinJvm
 
 plugins {
-  id("me.champeau.gradle.japicmp")
+  kotlin("jvm")
+  id("org.jetbrains.dokka")
+  id("com.vanniktech.maven.publish.base")
+  id("binary-compatibility-validator")
 }
 
-Projects.applyOsgi(
-  project,
+project.applyOsgi(
   "Export-Package: okhttp3.logging",
   "Automatic-Module-Name: okhttp3.logging",
   "Bundle-SymbolicName: com.squareup.okhttp3.logging"
 )
 
 dependencies {
-  api(project(":okhttp"))
-  compileOnly(Dependencies.jsr305)
+  api(projects.okhttp)
+  compileOnly(libs.findbugs.jsr305)
 
-  testCompileOnly(Dependencies.jsr305)
-  testImplementation(Dependencies.junit)
-  testImplementation(project(":mockwebserver"))
-  testImplementation(project(":mockwebserver-junit5"))
-  testImplementation(project(":okhttp-testing-support"))
-  testImplementation(project(":okhttp-tls"))
-  testImplementation(Dependencies.assertj)
+  testCompileOnly(libs.findbugs.jsr305)
+  testImplementation(libs.junit)
+  testImplementation(projects.mockwebserver3)
+  testImplementation(projects.mockwebserver3Junit5)
+  testImplementation(projects.okhttpTestingSupport)
+  testImplementation(projects.okhttpTls)
+  testImplementation(libs.assertk)
 }
 
-afterEvaluate {
-  tasks.dokka {
-    outputDirectory = "$rootDir/docs/4.x"
-    outputFormat = "gfm"
-  }
+mavenPublishing {
+  configure(KotlinJvm(javadocJar = JavadocJar.Empty()))
 }
-
-tasks.register<JapicmpTask>("japicmp") {
-  dependsOn("jar")
-  oldClasspath = files(Projects.baselineJar(project))
-  newClasspath = files(tasks.jar.get().archiveFile)
-  isOnlyBinaryIncompatibleModified = true
-  isFailOnModification = true
-  txtOutputFile = file("$buildDir/reports/japi.txt")
-  isIgnoreMissingClasses = true
-  isIncludeSynthetic = true
-}.let(tasks.check::dependsOn)

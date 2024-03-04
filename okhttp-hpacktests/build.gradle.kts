@@ -1,9 +1,13 @@
+plugins {
+  kotlin("jvm")
+}
+
 dependencies {
-  testImplementation(Dependencies.okio)
-  testImplementation(Dependencies.moshi)
-  testImplementation(project(":okhttp"))
-  testImplementation(project(":okhttp-testing-support"))
-  testImplementation(project(":mockwebserver-deprecated"))
-  testImplementation(Dependencies.junit)
-  testImplementation(Dependencies.assertj)
+  testImplementation(libs.squareup.okio)
+  testImplementation(libs.squareup.moshi)
+  testImplementation(libs.squareup.moshi.kotlin)
+  testImplementation(projects.okhttp)
+  testImplementation(projects.okhttpTestingSupport)
+  testImplementation(projects.mockwebserver)
+  testImplementation(libs.junit)
 }

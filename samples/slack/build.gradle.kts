@@ -1,4 +1,8 @@
+plugins {
+  kotlin("jvm")
+}
+
 dependencies {
-  implementation(project(":mockwebserver-deprecated"))
-  implementation(Dependencies.moshi)
+  implementation(projects.mockwebserver)
+  implementation(libs.squareup.moshi)
 }

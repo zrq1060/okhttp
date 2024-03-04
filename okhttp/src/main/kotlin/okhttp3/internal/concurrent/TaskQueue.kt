@@ -17,7 +17,9 @@ package okhttp3.internal.concurrent
 
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.RejectedExecutionException
-import okhttp3.internal.assertThreadDoesntHoldLock
+import java.util.concurrent.locks.ReentrantLock
+import kotlin.concurrent.withLock
+import okhttp3.internal.assertNotHeld
 import okhttp3.internal.okHttpName
 
 /**
@@ -28,8 +30,10 @@ import okhttp3.internal.okHttpName
  */
 class TaskQueue internal constructor(
   internal val taskRunner: TaskRunner,
-  internal val name: String
+  internal val name: String,
 ) {
+  val lock: ReentrantLock = ReentrantLock()
+
   internal var shutdown = false
 
   /** This queue's currently-executing task, or null if none is currently executing. */
@@ -46,7 +50,7 @@ class TaskQueue internal constructor(
    * currently-executing task unless it is also scheduled for future execution.
    */
   val scheduledTasks: List<Task>
-    get() = synchronized(taskRunner) { futureTasks.toList() }
+    get() = taskRunner.lock.withLock { futureTasks.toList() }
 
   /**
    * Schedules [task] for execution in [delayNanos]. A task may only have one future execution
@@ -58,8 +62,11 @@ class TaskQueue internal constructor(
    *
    * @throws RejectedExecutionException if the queue is shut down and the task is not cancelable.
    */
-  fun schedule(task: Task, delayNanos: Long = 0L) {
-    synchronized(taskRunner) {
+  fun schedule(
+    task: Task,
+    delayNanos: Long = 0L,
+  ) {
+    taskRunner.lock.withLock {
       if (shutdown) {
         if (task.cancelable) {
           taskRunner.logger.taskLog(task, this) { "schedule canceled (queue is shutdown)" }
@@ -75,37 +82,51 @@ class TaskQueue internal constructor(
     }
   }
 
-  /** Overload of [schedule] that uses a lambda for a repeating task. */
+  /**
+   * Overload of [schedule] that uses a lambda for a repeating task.
+   *
+   * TODO: make this inline once this is fixed: https://github.com/oracle/graal/issues/3466
+   */
   fun schedule(
     name: String,
     delayNanos: Long = 0L,
-    block: () -> Long
+    block: () -> Long,
   ) {
-    schedule(object : Task(name) {
-      override fun runOnce(): Long {
-        return block()
-      }
-    }, delayNanos)
+    schedule(
+      object : Task(name) {
+        override fun runOnce(): Long {
+          return block()
+        }
+      },
+      delayNanos,
+    )
   }
 
-  /** Executes [block] once on a task runner thread. */
+  /**
+   * Executes [block] once on a task runner thread.
+   *
+   * TODO: make this inline once this is fixed: https://github.com/oracle/graal/issues/3466
+   */
   fun execute(
     name: String,
     delayNanos: Long = 0L,
     cancelable: Boolean = true,
-    block: () -> Unit
+    block: () -> Unit,
   ) {
-    schedule(object : Task(name, cancelable) {
-      override fun runOnce(): Long {
-        block()
-        return -1L
-      }
-    }, delayNanos)
+    schedule(
+      object : Task(name, cancelable) {
+        override fun runOnce(): Long {
+          block()
+          return -1L
+        }
+      },
+      delayNanos,
+    )
   }
 
   /** Returns a latch that reaches 0 when the queue is next idle. */
   fun idleLatch(): CountDownLatch {
-    synchronized(taskRunner) {
+    taskRunner.lock.withLock {
       // If the queue is already idle, that's easy.
       if (activeTask == null && futureTasks.isEmpty()) {
         return CountDownLatch(0)
@@ -142,7 +163,11 @@ class TaskQueue internal constructor(
   }
 
   /** Adds [task] to run in [delayNanos]. Returns true if the coordinator is impacted. */
-  internal fun scheduleAndDecide(task: Task, delayNanos: Long, recurrence: Boolean): Boolean {
+  internal fun scheduleAndDecide(
+    task: Task,
+    delayNanos: Long,
+    recurrence: Boolean,
+  ): Boolean {
     task.initQueue(this)
 
     val now = taskRunner.backend.nanoTime()
@@ -159,8 +184,11 @@ class TaskQueue internal constructor(
     }
     task.nextExecuteNanoTime = executeNanoTime
     taskRunner.logger.taskLog(task, this) {
-      if (recurrence) "run again after ${formatDuration(executeNanoTime - now)}"
-      else "scheduled after ${formatDuration(executeNanoTime - now)}"
+      if (recurrence) {
+        "run again after ${formatDuration(executeNanoTime - now)}"
+      } else {
+        "scheduled after ${formatDuration(executeNanoTime - now)}"
+      }
     }
 
     // Insert in chronological order. Always compare deltas because nanoTime() is permitted to wrap.
@@ -178,9 +206,9 @@ class TaskQueue internal constructor(
    * be removed from the execution schedule.
    */
   fun cancelAll() {
-    this.assertThreadDoesntHoldLock()
+    lock.assertNotHeld()
 
-    synchronized(taskRunner) {
+    taskRunner.lock.withLock {
       if (cancelAllAndDecide()) {
         taskRunner.kickCoordinator(this)
       }
@@ -188,9 +216,9 @@ class TaskQueue internal constructor(
   }
 
   fun shutdown() {
-    this.assertThreadDoesntHoldLock()
+    lock.assertNotHeld()
 
-    synchronized(taskRunner) {
+    taskRunner.lock.withLock {
       shutdown = true
       if (cancelAllAndDecide()) {
         taskRunner.kickCoordinator(this)

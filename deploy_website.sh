@@ -2,9 +2,7 @@
 
 # The website is built using MkDocs with the Material theme.
 # https://squidfunk.github.io/mkdocs-material/
-# It requires Python to run.
-# Install the packages with the following command:
-# pip install mkdocs mkdocs-material
+# It requires python3 to run.
 
 set -ex
 
@@ -16,54 +14,34 @@ rm -rf $DIR
 
 # Clone the current repo into temp folder
 git clone $REPO $DIR
+# Replace `git clone` with these lines to hack on the website locally
+# cp -a . "../okhttp-website"
+# mv "../okhttp-website" "$DIR"
 
 # Move working directory into temp folder
 cd $DIR
 
 # Generate the API docs
-./gradlew \
-  :mockwebserver:dokka \
-  :okhttp-brotli:dokka \
-  :okhttp-dnsoverhttps:dokka \
-  :okhttp-logging-interceptor:dokka \
-  :okhttp-sse:dokka \
-  :okhttp-tls:dokka \
-  :okhttp-urlconnection:dokka \
-  :okhttp:dokka
+./gradlew dokkaHtmlMultiModule
 
-# Dokka filenames like `-http-url/index.md` don't work well with MkDocs <title> tags.
-# Assign metadata to the file's first Markdown heading.
-# https://www.mkdocs.org/user-guide/writing-your-docs/#meta-data
-title_markdown_file() {
-  TITLE_PATTERN="s/^[#]+ *(.*)/title: \1 - OkHttp/"
-  echo "---"                                                     > "$1.fixed"
-  cat $1 | sed -E "$TITLE_PATTERN" | grep "title: " | head -n 1 >> "$1.fixed"
-  echo "---"                                                    >> "$1.fixed"
-  echo                                                          >> "$1.fixed"
-  cat $1                                                        >> "$1.fixed"
-  mv "$1.fixed" "$1"
-}
-
-set +x
-for MARKDOWN_FILE in $(find docs/4.x/ -name '*.md'); do
-  echo $MARKDOWN_FILE
-  title_markdown_file $MARKDOWN_FILE
-done
-set -x
+mv ./build/dokka/htmlMultiModule docs/5.x
 
 # Copy in special files that GitHub wants in the project root.
 cat README.md | grep -v 'project website' > docs/index.md
-cp CHANGELOG.md docs/changelog.md
-cp CONTRIBUTING.md docs/contributing.md
+cp CHANGELOG.md docs/changelogs/changelog.md
+cp CONTRIBUTING.md docs/contribute/contributing.md
 
 # Build the site and push the new files up to GitHub
+python3 -m venv venv
+source venv/bin/activate
+pip install mkdocs-material mkdocs-redirects
 mkdocs gh-deploy
 
 # Restore Javadocs from 1.x, 2.x, and 3.x.
 git checkout gh-pages
 git cherry-pick bb229b9dcc9a21a73edbf8d936bea88f52e0a3ff
 git cherry-pick c695732f1d4aea103b826876c077fbfea630e244
-git push
+git push --set-upstream origin gh-pages
 
 # Delete our temp folder
 cd ..

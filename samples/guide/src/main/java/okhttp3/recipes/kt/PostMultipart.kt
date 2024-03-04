@@ -28,14 +28,19 @@ class PostMultipart {
 
   fun run() {
     // Use the imgur image upload API as documented at https://api.imgur.com/endpoints/image
-    val requestBody = MultipartBody.Builder()
+    val requestBody =
+      MultipartBody.Builder()
         .setType(MultipartBody.FORM)
         .addFormDataPart("title", "Square Logo")
-        .addFormDataPart("image", "logo-square.png",
-            File("docs/images/logo-square.png").asRequestBody(MEDIA_TYPE_PNG))
+        .addFormDataPart(
+          "image",
+          "logo-square.png",
+          File("docs/images/logo-square.png").asRequestBody(MEDIA_TYPE_PNG),
+        )
         .build()
 
-    val request = Request.Builder()
+    val request =
+      Request.Builder()
         .header("Authorization", "Client-ID $IMGUR_CLIENT_ID")
         .url("https://api.imgur.com/3/image")
         .post(requestBody)
@@ -44,7 +49,7 @@ class PostMultipart {
     client.newCall(request).execute().use { response ->
       if (!response.isSuccessful) throw IOException("Unexpected code $response")
 
-      println(response.body!!.string())
+      println(response.body.string())
     }
   }
 
@@ -53,7 +58,7 @@ class PostMultipart {
      * The imgur client ID for OkHttp recipes. If you're using imgur for anything other than running
      * these examples, please request your own client ID! https://api.imgur.com/oauth2
      */
-    private val IMGUR_CLIENT_ID = "9199fdef135c122"
+    private const val IMGUR_CLIENT_ID = "9199fdef135c122"
     private val MEDIA_TYPE_PNG = "image/png".toMediaType()
   }
 }

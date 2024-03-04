@@ -15,6 +15,19 @@
  */
 package okhttp3
 
+import assertk.assertThat
+import assertk.assertions.isEqualTo
+import assertk.assertions.isNotEmpty
+import assertk.assertions.isNotNull
+import java.io.IOException
+import java.net.InetAddress
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.TimeUnit.SECONDS
+import javax.net.ssl.SNIHostName
+import javax.net.ssl.SNIMatcher
+import javax.net.ssl.SNIServerName
+import javax.net.ssl.SSLSocket
+import javax.net.ssl.StandardConstants
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
 import okhttp3.Protocol.HTTP_1_1
@@ -28,50 +41,55 @@ import okhttp3.TlsVersion.TLS_1_3
 import okhttp3.testing.PlatformRule
 import okhttp3.tls.HandshakeCertificates
 import okhttp3.tls.HeldCertificate
-import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Assumptions.assumeFalse
 import org.junit.jupiter.api.Assumptions.assumeTrue
+import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.Timeout
 import org.junit.jupiter.api.extension.RegisterExtension
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.MethodSource
-import java.io.IOException
-import java.net.InetAddress
-import java.util.concurrent.CompletableFuture
-import java.util.concurrent.TimeUnit.SECONDS
-import javax.net.ssl.SNIHostName
-import javax.net.ssl.SNIMatcher
-import javax.net.ssl.SNIServerName
-import javax.net.ssl.SSLSocket
-import javax.net.ssl.StandardConstants
 
 @Suppress("UsePropertyAccessSyntax")
 @Timeout(6)
 @Tag("slow")
-class SocketChannelTest(
-  val server: MockWebServer
-) {
-  @JvmField @RegisterExtension val platform = PlatformRule()
-  @JvmField @RegisterExtension val clientTestRule = OkHttpClientTestRule().apply {
-    recordFrames = true
-    // recordSslDebug = true
-  }
+class SocketChannelTest {
+  @JvmField @RegisterExtension
+  val platform = PlatformRule()
+
+  @JvmField @RegisterExtension
+  val clientTestRule =
+    OkHttpClientTestRule().apply {
+      recordFrames = true
+      // recordSslDebug = true
+    }
 
   // https://tools.ietf.org/html/rfc6066#page-6 specifies a FQDN is required.
   val hostname = "local.host"
-  private val handshakeCertificates = run {
-    // Generate a self-signed cert for the server to serve and the client to trust.
-    val heldCertificate = HeldCertificate.Builder()
-      .commonName(hostname)
-      .addSubjectAlternativeName(hostname)
-      .build()
-    HandshakeCertificates.Builder()
-      .heldCertificate(heldCertificate)
-      .addTrustedCertificate(heldCertificate.certificate)
-      .build()
-  }
+  private val handshakeCertificates =
+    run {
+      // Generate a self-signed cert for the server to serve and the client to trust.
+      val heldCertificate =
+        HeldCertificate.Builder()
+          .commonName(hostname)
+          .addSubjectAlternativeName(hostname)
+          .build()
+      HandshakeCertificates.Builder()
+        .heldCertificate(heldCertificate)
+        .addTrustedCertificate(heldCertificate.certificate)
+        .build()
+    }
   private var acceptedHostName: String? = null
+
+  private lateinit var server: MockWebServer
+
+  @BeforeEach
+  fun setUp(server: MockWebServer) {
+    this.server = server
+
+    // Test designed for Conscrypt and JSSE
+    platform.assumeNotBouncyCastle()
+  }
 
   @ParameterizedTest
   @MethodSource("connectionTypes")
@@ -82,96 +100,114 @@ class SocketChannelTest(
         socketMode.socketMode == Channel &&
         socketMode.protocol == HTTP_2 &&
         socketMode.tlsExtensionMode == STANDARD,
-      "failing for channel and h2"
+      "failing for channel and h2",
     )
 
     if (socketMode is TlsInstance) {
       assumeTrue((socketMode.provider == CONSCRYPT) == platform.isConscrypt())
     }
 
-    val client = clientTestRule.newClientBuilder()
-      .dns { listOf(InetAddress.getByName("localhost")) }
-      .callTimeout(4, SECONDS)
-      .writeTimeout(2, SECONDS)
-      .readTimeout(2, SECONDS)
-      .apply {
-        if (socketMode is TlsInstance) {
-          if (socketMode.socketMode == Channel) {
-            socketFactory(ChannelSocketFactory())
-          }
+    val client =
+      clientTestRule.newClientBuilder()
+        .dns { listOf(InetAddress.getByName("localhost")) }
+        .callTimeout(4, SECONDS)
+        .writeTimeout(2, SECONDS)
+        .readTimeout(2, SECONDS)
+        .apply {
+          if (socketMode is TlsInstance) {
+            if (socketMode.socketMode == Channel) {
+              socketFactory(ChannelSocketFactory())
+            }
 
-          connectionSpecs(
-            listOf(
-              ConnectionSpec.Builder(ConnectionSpec.COMPATIBLE_TLS)
-                .tlsVersions(socketMode.tlsVersion)
-                .supportsTlsExtensions(socketMode.tlsExtensionMode == STANDARD)
-                .build()
+            connectionSpecs(
+              listOf(
+                ConnectionSpec.Builder(ConnectionSpec.COMPATIBLE_TLS)
+                  .tlsVersions(socketMode.tlsVersion)
+                  .supportsTlsExtensions(socketMode.tlsExtensionMode == STANDARD)
+                  .build(),
+              ),
             )
-          )
 
-          val sslSocketFactory = handshakeCertificates.sslSocketFactory()
+            val sslSocketFactory = handshakeCertificates.sslSocketFactory()
 
-          sslSocketFactory(
-            sslSocketFactory, handshakeCertificates.trustManager
-          )
+            sslSocketFactory(
+              sslSocketFactory,
+              handshakeCertificates.trustManager,
+            )
 
-          when (socketMode.protocol) {
-            HTTP_2 -> protocols(listOf(HTTP_2, HTTP_1_1))
-            HTTP_1_1 -> protocols(listOf(HTTP_1_1))
-            else -> TODO()
-          }
+            when (socketMode.protocol) {
+              HTTP_2 -> protocols(listOf(HTTP_2, HTTP_1_1))
+              HTTP_1_1 -> protocols(listOf(HTTP_1_1))
+              else -> TODO()
+            }
 
-          val serverSslSocketFactory = object: DelegatingSSLSocketFactory(sslSocketFactory) {
-            override fun configureSocket(sslSocket: SSLSocket): SSLSocket {
-              return sslSocket.apply {
-                sslParameters = sslParameters.apply {
-                  sniMatchers = listOf(object : SNIMatcher(StandardConstants.SNI_HOST_NAME) {
-                    override fun matches(serverName: SNIServerName): Boolean {
-                      acceptedHostName = (serverName as SNIHostName).asciiName
-                      return true
-                    }
-                  })
+            val serverSslSocketFactory =
+              object : DelegatingSSLSocketFactory(sslSocketFactory) {
+                override fun configureSocket(sslSocket: SSLSocket): SSLSocket {
+                  return sslSocket.apply {
+                    sslParameters =
+                      sslParameters.apply {
+                        sniMatchers =
+                          listOf(
+                            object : SNIMatcher(StandardConstants.SNI_HOST_NAME) {
+                              override fun matches(serverName: SNIServerName): Boolean {
+                                acceptedHostName = (serverName as SNIHostName).asciiName
+                                return true
+                              }
+                            },
+                          )
+                      }
+                  }
                 }
               }
-            }
+            server.useHttps(serverSslSocketFactory)
+          } else if (socketMode == Channel) {
+            socketFactory(ChannelSocketFactory())
           }
-          server.useHttps(serverSslSocketFactory, false)
-        } else if (socketMode == Channel) {
-          socketFactory(ChannelSocketFactory())
         }
-      }
-      .build()
+        .build()
 
-    server.enqueue(MockResponse().setBody("abc"))
+    server.enqueue(MockResponse(body = "abc"))
 
-    @Suppress("HttpUrlsUsage") val url =
-      if (socketMode is TlsInstance)
+    @Suppress("HttpUrlsUsage")
+    val url =
+      if (socketMode is TlsInstance) {
         "https://$hostname:${server.port}/get"
-      else
+      } else {
         "http://$hostname:${server.port}/get"
+      }
 
-    val request = Request.Builder()
-      .url(url)
-      .build()
+    val request =
+      Request.Builder()
+        .url(url)
+        .build()
 
     val promise = CompletableFuture<Response>()
 
     val call = client.newCall(request)
-    call.enqueue(object : Callback {
-      override fun onFailure(call: Call, e: IOException) {
-        promise.completeExceptionally(e)
-      }
+    call.enqueue(
+      object : Callback {
+        override fun onFailure(
+          call: Call,
+          e: IOException,
+        ) {
+          promise.completeExceptionally(e)
+        }
 
-      override fun onResponse(call: Call, response: Response) {
-        promise.complete(response)
-      }
-    })
+        override fun onResponse(
+          call: Call,
+          response: Response,
+        ) {
+          promise.complete(response)
+        }
+      },
+    )
 
     val response = promise.get(4, SECONDS)
 
     assertThat(response).isNotNull()
 
-    assertThat(response.body!!.string()).isNotBlank()
+    assertThat(response.body.string()).isNotEmpty()
 
     if (socketMode is TlsInstance) {
       assertThat(response.handshake!!.tlsVersion).isEqualTo(socketMode.tlsVersion)
@@ -187,7 +223,8 @@ class SocketChannelTest(
   }
 
   companion object {
-    @Suppress("unused") @JvmStatic
+    @Suppress("unused")
+    @JvmStatic
     fun connectionTypes(): List<SocketMode> =
       listOf(CONSCRYPT, JSSE).flatMap { provider ->
         listOf(HTTP_1_1, HTTP_2).flatMap { protocol ->
@@ -218,17 +255,17 @@ data class TlsInstance(
   val protocol: Protocol,
   val tlsVersion: TlsVersion,
   val socketMode: SocketMode,
-  val tlsExtensionMode: TlsExtensionMode
+  val tlsExtensionMode: TlsExtensionMode,
 ) : SocketMode() {
   override fun toString(): String = "$provider/$protocol/$tlsVersion/$socketMode/$tlsExtensionMode"
 }
 
 enum class Provider {
   JSSE,
-  CONSCRYPT
+  CONSCRYPT,
 }
 
 enum class TlsExtensionMode {
   DISABLED,
-  STANDARD
+  STANDARD,
 }

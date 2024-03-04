@@ -18,6 +18,7 @@ package okhttp3.internal.platform.android
 import javax.net.ssl.SSLSocket
 import javax.net.ssl.SSLSocketFactory
 import javax.net.ssl.X509TrustManager
+import okhttp3.OkHttpClient
 import okhttp3.internal.platform.Platform
 import okhttp3.internal.readFieldOrNull
 
@@ -30,21 +31,28 @@ import okhttp3.internal.readFieldOrNull
 class StandardAndroidSocketAdapter(
   sslSocketClass: Class<in SSLSocket>,
   private val sslSocketFactoryClass: Class<in SSLSocketFactory>,
-  private val paramClass: Class<*>
+  private val paramClass: Class<*>,
 ) : AndroidSocketAdapter(sslSocketClass) {
-
-  override fun matchesSocketFactory(sslSocketFactory: SSLSocketFactory): Boolean =
-      sslSocketFactoryClass.isInstance(sslSocketFactory)
+  override fun matchesSocketFactory(sslSocketFactory: SSLSocketFactory): Boolean = sslSocketFactoryClass.isInstance(sslSocketFactory)
 
   override fun trustManager(sslSocketFactory: SSLSocketFactory): X509TrustManager? {
     val context: Any? =
-        readFieldOrNull(sslSocketFactory, paramClass,
-            "sslParameters")
-    val x509TrustManager = readFieldOrNull(
-        context!!, X509TrustManager::class.java, "x509TrustManager")
-    return x509TrustManager ?: readFieldOrNull(context,
+      readFieldOrNull(
+        sslSocketFactory,
+        paramClass,
+        "sslParameters",
+      )
+    val x509TrustManager =
+      readFieldOrNull(
+        context!!,
         X509TrustManager::class.java,
-        "trustManager")
+        "x509TrustManager",
+      )
+    return x509TrustManager ?: readFieldOrNull(
+      context,
+      X509TrustManager::class.java,
+      "trustManager",
+    )
   }
 
   companion object {
@@ -53,12 +61,17 @@ class StandardAndroidSocketAdapter(
       return try {
         val sslSocketClass = Class.forName("$packageName.OpenSSLSocketImpl") as Class<in SSLSocket>
         val sslSocketFactoryClass =
-            Class.forName("$packageName.OpenSSLSocketFactoryImpl") as Class<in SSLSocketFactory>
+          Class.forName("$packageName.OpenSSLSocketFactoryImpl") as Class<in SSLSocketFactory>
         val paramsClass = Class.forName("$packageName.SSLParametersImpl")
 
         StandardAndroidSocketAdapter(sslSocketClass, sslSocketFactoryClass, paramsClass)
       } catch (e: Exception) {
-        Platform.get().log(level = Platform.WARN, message = "unable to load android socket classes", t = e)
+        AndroidLog.androidLog(
+          loggerName = OkHttpClient::class.java.name,
+          logLevel = Platform.WARN,
+          message = "unable to load android socket classes",
+          t = e,
+        )
         null
       }
     }

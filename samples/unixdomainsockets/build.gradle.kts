@@ -1,5 +1,9 @@
+plugins {
+  kotlin("jvm")
+}
+
 dependencies {
-  implementation(project(":okhttp"))
-  implementation(project(":mockwebserver-deprecated"))
-  implementation(Dependencies.jnrUnixsocket)
+  implementation(projects.okhttp)
+  implementation(projects.mockwebserver)
+  implementation(libs.jnr.unixsocket)
 }

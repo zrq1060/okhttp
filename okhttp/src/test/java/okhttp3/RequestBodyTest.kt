@@ -15,28 +15,31 @@
  */
 package okhttp3
 
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.RequestBody.Companion.toRequestBody
-import okio.Buffer
-import okio.ExperimentalFileSystem
-import okio.FileSystem
-import okio.Path.Companion.toOkioPath
-import org.assertj.core.api.Assertions.assertThat
-import org.junit.jupiter.api.Assertions.assertThrows
-import org.junit.jupiter.api.BeforeEach
-import org.junit.jupiter.api.Test
-import org.junit.jupiter.api.io.TempDir
+import assertk.assertThat
+import assertk.assertions.isEqualTo
+import assertk.assertions.isNull
 import java.io.FileDescriptor
 import java.io.FileInputStream
 import java.io.IOException
 import java.nio.file.Path
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.asRequestBody
+import okhttp3.RequestBody.Companion.toRequestBody
+import okio.Buffer
+import okio.FileSystem
+import okio.Path.Companion.toOkioPath
+import org.junit.jupiter.api.Assertions.assertThrows
+import org.junit.jupiter.api.BeforeEach
+import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.io.TempDir
 
-@OptIn(ExperimentalFileSystem::class)
 class RequestBodyTest {
   private lateinit var filePath: okio.Path
 
   @BeforeEach
-  fun setup(@TempDir tempDir: Path) {
+  fun setup(
+    @TempDir tempDir: Path,
+  ) {
     filePath = tempDir.toOkioPath() / "file.txt"
   }
 
@@ -105,15 +108,38 @@ class RequestBodyTest {
     }
   }
 
-  private inline fun <T> assertOnFileDescriptor(content: String? = null, fn: (FileDescriptor) -> T): T {
+  @Test
+  fun testPathRead() {
+    assertOnPath(content = "Hello") { path ->
+      val requestBody = path.asRequestBody(FileSystem.SYSTEM)
+
+      val buffer = Buffer()
+      requestBody.writeTo(buffer)
+      assertThat(buffer.readUtf8()).isEqualTo("Hello")
+    }
+  }
+
+  private inline fun <T> assertOnFileDescriptor(
+    content: String? = null,
+    fn: (FileDescriptor) -> T,
+  ): T {
+    return assertOnPath(content) {
+      FileInputStream(filePath.toFile()).use { fis ->
+        fn(fis.fd)
+      }
+    }
+  }
+
+  private inline fun <T> assertOnPath(
+    content: String? = null,
+    fn: (okio.Path) -> T,
+  ): T {
     FileSystem.SYSTEM.write(filePath) {
       if (content != null) {
         writeUtf8(content)
       }
     }
 
-    return FileInputStream(filePath.toFile()).use { fis ->
-      fn(fis.fd)
-    }
+    return fn(filePath)
   }
 }

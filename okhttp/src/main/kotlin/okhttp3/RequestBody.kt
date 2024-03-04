@@ -15,20 +15,24 @@
  */
 package okhttp3
 
-import okhttp3.MediaType.Companion.toMediaTypeOrNull
-import okhttp3.internal.checkOffsetAndCount
-import okio.BufferedSink
-import okio.ByteString
-import okio.source
 import java.io.File
 import java.io.FileDescriptor
 import java.io.FileInputStream
 import java.io.IOException
-import java.nio.charset.Charset
-import kotlin.text.Charsets.UTF_8
+import okhttp3.internal.chooseCharset
+import okhttp3.internal.commonContentLength
+import okhttp3.internal.commonIsDuplex
+import okhttp3.internal.commonIsOneShot
+import okhttp3.internal.commonToRequestBody
+import okio.BufferedSink
+import okio.ByteString
+import okio.FileSystem
+import okio.GzipSink
+import okio.Path
+import okio.buffer
+import okio.source
 
 abstract class RequestBody {
-
   /** Returns the Content-Type header for this body. */
   abstract fun contentType(): MediaType?
 
@@ -37,7 +41,7 @@ abstract class RequestBody {
    * or -1 if that count is unknown.
    */
   @Throws(IOException::class)
-  open fun contentLength(): Long = -1L
+  open fun contentLength(): Long = commonContentLength()
 
   /** Writes the content of this request to [sink]. */
   @Throws(IOException::class)
@@ -75,7 +79,7 @@ abstract class RequestBody {
    *
    * [grpc]: https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-HTTP2.md
    */
-  open fun isDuplex(): Boolean = false
+  open fun isDuplex(): Boolean = commonIsDuplex()
 
   /**
    * Returns true if this body expects at most one call to [writeTo] and can be transmitted
@@ -94,10 +98,9 @@ abstract class RequestBody {
    *  * A retryable server failure (HTTP 503 with a `Retry-After: 0` response header).
    *  * A misdirected request (HTTP 421) on a coalesced connection.
    */
-  open fun isOneShot(): Boolean = false
+  open fun isOneShot(): Boolean = commonIsOneShot()
 
   companion object {
-
     /**
      * Returns a new request body that transmits this string. If [contentType] is non-null and lacks
      * a charset, this will use UTF-8.
@@ -105,39 +108,19 @@ abstract class RequestBody {
     @JvmStatic
     @JvmName("create")
     fun String.toRequestBody(contentType: MediaType? = null): RequestBody {
-      var charset: Charset = UTF_8
-      var finalContentType: MediaType? = contentType
-      if (contentType != null) {
-        val resolvedCharset = contentType.charset()
-        if (resolvedCharset == null) {
-          charset = UTF_8
-          finalContentType = "$contentType; charset=utf-8".toMediaTypeOrNull()
-        } else {
-          charset = resolvedCharset
-        }
-      }
+      val (charset, finalContentType) = contentType.chooseCharset()
       val bytes = toByteArray(charset)
       return bytes.toRequestBody(finalContentType, 0, bytes.size)
     }
 
-    /** Returns a new request body that transmits this. */
     @JvmStatic
     @JvmName("create")
-    fun ByteString.toRequestBody(contentType: MediaType? = null): RequestBody {
-      return object : RequestBody() {
-        override fun contentType() = contentType
-
-        override fun contentLength() = size.toLong()
-
-        override fun writeTo(sink: BufferedSink) {
-          sink.write(this@toRequestBody)
-        }
-      }
-    }
+    fun ByteString.toRequestBody(contentType: MediaType? = null): RequestBody = commonToRequestBody(contentType)
 
     /** Returns a new request body that transmits this. */
     @JvmStatic
     @JvmName("create")
+    @ExperimentalOkHttpApi
     fun FileDescriptor.toRequestBody(contentType: MediaType? = null): RequestBody {
       return object : RequestBody() {
         override fun contentType() = contentType
@@ -159,19 +142,8 @@ abstract class RequestBody {
     fun ByteArray.toRequestBody(
       contentType: MediaType? = null,
       offset: Int = 0,
-      byteCount: Int = size
-    ): RequestBody {
-      checkOffsetAndCount(size.toLong(), offset.toLong(), byteCount.toLong())
-      return object : RequestBody() {
-        override fun contentType() = contentType
-
-        override fun contentLength() = byteCount.toLong()
-
-        override fun writeTo(sink: BufferedSink) {
-          sink.write(this@toRequestBody, offset, byteCount)
-        }
-      }
-    }
+      byteCount: Int = size,
+    ): RequestBody = commonToRequestBody(contentType, offset, byteCount)
 
     /** Returns a new request body that transmits the content of this. */
     @JvmStatic
@@ -188,53 +160,120 @@ abstract class RequestBody {
       }
     }
 
+    /** Returns a new request body that transmits the content of this. */
     @JvmStatic
-    @Deprecated(
-        message = "Moved to extension function. Put the 'content' argument first to fix Java",
-        replaceWith = ReplaceWith(
-            expression = "content.toRequestBody(contentType)",
-            imports = ["okhttp3.RequestBody.Companion.toRequestBody"]
-        ),
-        level = DeprecationLevel.WARNING)
-    fun create(contentType: MediaType?, content: String): RequestBody = content.toRequestBody(contentType)
+    @JvmName("create")
+    @ExperimentalOkHttpApi
+    fun Path.asRequestBody(
+      fileSystem: FileSystem,
+      contentType: MediaType? = null,
+    ): RequestBody {
+      return object : RequestBody() {
+        override fun contentType() = contentType
+
+        override fun contentLength() = fileSystem.metadata(this@asRequestBody).size ?: -1
+
+        override fun writeTo(sink: BufferedSink) {
+          fileSystem.source(this@asRequestBody).use { source -> sink.writeAll(source) }
+        }
+      }
+    }
 
     @JvmStatic
     @Deprecated(
-        message = "Moved to extension function. Put the 'content' argument first to fix Java",
-        replaceWith = ReplaceWith(
-            expression = "content.toRequestBody(contentType)",
-            imports = ["okhttp3.RequestBody.Companion.toRequestBody"]
+      message = "Moved to extension function. Put the 'content' argument first to fix Java",
+      replaceWith =
+        ReplaceWith(
+          expression = "content.toRequestBody(contentType)",
+          imports = ["okhttp3.RequestBody.Companion.toRequestBody"],
         ),
-        level = DeprecationLevel.WARNING)
+      level = DeprecationLevel.WARNING,
+    )
     fun create(
       contentType: MediaType?,
-      content: ByteString
+      content: String,
+    ): RequestBody = content.toRequestBody(contentType)
+
+    @JvmStatic
+    @Deprecated(
+      message = "Moved to extension function. Put the 'content' argument first to fix Java",
+      replaceWith =
+        ReplaceWith(
+          expression = "content.toRequestBody(contentType)",
+          imports = ["okhttp3.RequestBody.Companion.toRequestBody"],
+        ),
+      level = DeprecationLevel.WARNING,
+    )
+    fun create(
+      contentType: MediaType?,
+      content: ByteString,
     ): RequestBody = content.toRequestBody(contentType)
 
     @JvmOverloads
     @JvmStatic
     @Deprecated(
-        message = "Moved to extension function. Put the 'content' argument first to fix Java",
-        replaceWith = ReplaceWith(
-            expression = "content.toRequestBody(contentType, offset, byteCount)",
-            imports = ["okhttp3.RequestBody.Companion.toRequestBody"]
+      message = "Moved to extension function. Put the 'content' argument first to fix Java",
+      replaceWith =
+        ReplaceWith(
+          expression = "content.toRequestBody(contentType, offset, byteCount)",
+          imports = ["okhttp3.RequestBody.Companion.toRequestBody"],
         ),
-        level = DeprecationLevel.WARNING)
+      level = DeprecationLevel.WARNING,
+    )
     fun create(
       contentType: MediaType?,
       content: ByteArray,
       offset: Int = 0,
-      byteCount: Int = content.size
+      byteCount: Int = content.size,
     ): RequestBody = content.toRequestBody(contentType, offset, byteCount)
 
     @JvmStatic
     @Deprecated(
-        message = "Moved to extension function. Put the 'file' argument first to fix Java",
-        replaceWith = ReplaceWith(
-            expression = "file.asRequestBody(contentType)",
-            imports = ["okhttp3.RequestBody.Companion.asRequestBody"]
+      message = "Moved to extension function. Put the 'file' argument first to fix Java",
+      replaceWith =
+        ReplaceWith(
+          expression = "file.asRequestBody(contentType)",
+          imports = ["okhttp3.RequestBody.Companion.asRequestBody"],
         ),
-        level = DeprecationLevel.WARNING)
-    fun create(contentType: MediaType?, file: File): RequestBody= file.asRequestBody(contentType)
+      level = DeprecationLevel.WARNING,
+    )
+    fun create(
+      contentType: MediaType?,
+      file: File,
+    ): RequestBody = file.asRequestBody(contentType)
+
+    /**
+     * Returns a gzip version of the RequestBody, with compressed payload.
+     * This is not automatic as not all servers support gzip compressed requests.
+     *
+     * ```
+     * val request = Request.Builder().url("...")
+     *  .addHeader("Content-Encoding", "gzip")
+     *  .post(uncompressedBody.gzip())
+     *  .build()
+     * ```
+     */
+    @JvmStatic
+    @ExperimentalOkHttpApi
+    fun RequestBody.gzip(): RequestBody {
+      return object : RequestBody() {
+        override fun contentType(): MediaType? {
+          return this@gzip.contentType()
+        }
+
+        override fun contentLength(): Long {
+          return -1 // We don't know the compressed length in advance!
+        }
+
+        @Throws(IOException::class)
+        override fun writeTo(sink: BufferedSink) {
+          GzipSink(sink).buffer().use(this@gzip::writeTo)
+        }
+
+        override fun isOneShot(): Boolean {
+          return this@gzip.isOneShot()
+        }
+      }
+    }
   }
 }

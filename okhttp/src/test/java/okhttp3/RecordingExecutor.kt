@@ -15,15 +15,16 @@
  */
 package okhttp3
 
+import assertk.assertThat
+import assertk.assertions.containsExactly
 import java.util.concurrent.AbstractExecutorService
 import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.TimeUnit
 import okhttp3.internal.connection.RealCall
 import okhttp3.internal.finishedAccessor
-import org.assertj.core.api.Assertions.assertThat
 
 internal class RecordingExecutor(
-  private val dispatcherTest: DispatcherTest
+  private val dispatcherTest: DispatcherTest,
 ) : AbstractExecutorService() {
   private var shutdown: Boolean = false
   private val calls = mutableListOf<RealCall.AsyncCall>()
@@ -60,14 +61,17 @@ internal class RecordingExecutor(
   }
 
   override fun isShutdown(): Boolean {
-    throw UnsupportedOperationException()
+    return shutdown
   }
 
   override fun isTerminated(): Boolean {
     throw UnsupportedOperationException()
   }
 
-  override fun awaitTermination(timeout: Long, unit: TimeUnit): Boolean {
+  override fun awaitTermination(
+    timeout: Long,
+    unit: TimeUnit,
+  ): Boolean {
     throw UnsupportedOperationException()
   }
 }

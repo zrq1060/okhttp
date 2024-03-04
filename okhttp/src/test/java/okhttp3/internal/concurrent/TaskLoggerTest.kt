@@ -15,12 +15,13 @@
  */
 package okhttp3.internal.concurrent
 
-import org.assertj.core.api.Assertions.assertThat
+import assertk.assertThat
+import assertk.assertions.isEqualTo
 import org.junit.jupiter.api.Test
 
 class TaskLoggerTest {
+  @Suppress("ktlint")
   @Test fun formatTime() {
-    /* ktlint-disable */
     assertThat(formatDuration(-3_499_999_999L)).isEqualTo(" -3 s ")
     assertThat(formatDuration(-3_000_000_000L)).isEqualTo(" -3 s ")
     assertThat(formatDuration(-2_500_000_000L)).isEqualTo(" -3 s ")
@@ -64,6 +65,5 @@ class TaskLoggerTest {
     assertThat(formatDuration(           999L)).isEqualTo("  1 µs")
     assertThat(formatDuration(           500L)).isEqualTo("  1 µs")
     assertThat(formatDuration(           499L)).isEqualTo("  0 µs")
-    /* ktlint-enable */
   }
 }

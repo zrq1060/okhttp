@@ -38,7 +38,10 @@ interface CookieJar {
    * cookies.
    */
   //存储cookie
-  fun saveFromResponse(url: HttpUrl, cookies: List<Cookie>)
+  fun saveFromResponse(
+    url: HttpUrl,
+    cookies: List<Cookie>,
+  )
 
   /**
    * Load cookies from the jar for an HTTP request to [url]. This method returns a possibly
@@ -55,8 +58,12 @@ interface CookieJar {
     @JvmField
     // 默认实现
     val NO_COOKIES: CookieJar = NoCookies()
+
     private class NoCookies : CookieJar {
-      override fun saveFromResponse(url: HttpUrl, cookies: List<Cookie>) {
+      override fun saveFromResponse(
+        url: HttpUrl,
+        cookies: List<Cookie>,
+      ) {
       }
 
       override fun loadForRequest(url: HttpUrl): List<Cookie> {

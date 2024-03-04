@@ -23,7 +23,8 @@ class SynchronousGet {
   private val client = OkHttpClient()
 
   fun run() {
-    val request = Request.Builder()
+    val request =
+      Request.Builder()
         .url("https://publicobject.com/helloworld.txt")
         .build()
 
@@ -34,7 +35,7 @@ class SynchronousGet {
         println("$name: $value")
       }
 
-      println(response.body!!.string())
+      println(response.body.string())
     }
   }
 }

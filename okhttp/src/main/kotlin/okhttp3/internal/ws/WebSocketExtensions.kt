@@ -19,6 +19,7 @@ import java.io.IOException
 import okhttp3.Headers
 import okhttp3.internal.delimiterOffset
 import okhttp3.internal.trimSubstring
+import org.codehaus.mojo.animal_sniffer.IgnoreJRERequirement
 
 /**
  * Models the contents of a `Sec-WebSocket-Extensions` response header. OkHttp honors one extension
@@ -56,29 +57,24 @@ import okhttp3.internal.trimSubstring
  *
  * [rfc_7692]: https://tools.ietf.org/html/rfc7692#section-7.1
  */
+@IgnoreJRERequirement // As of AGP 3.4.1, D8 desugars API 24 hashCode methods.
 data class WebSocketExtensions(
   /** True if the agreed upon extensions includes the permessage-deflate extension. */
   @JvmField val perMessageDeflate: Boolean = false,
-
   /** Should be a value in [8..15]. Only 15 is acceptable by OkHttp as Java APIs are limited. */
   @JvmField val clientMaxWindowBits: Int? = null,
-
   /** True if the agreed upon extension parameters includes "client_no_context_takeover". */
   @JvmField val clientNoContextTakeover: Boolean = false,
-
   /** Should be a value in [8..15]. Any value in that range is acceptable by OkHttp. */
   @JvmField val serverMaxWindowBits: Int? = null,
-
   /** True if the agreed upon extension parameters includes "server_no_context_takeover". */
   @JvmField val serverNoContextTakeover: Boolean = false,
-
   /**
    * True if the agreed upon extensions or parameters contained values unrecognized by OkHttp.
    * Typically this indicates that the client will need to close the web socket with code 1010.
    */
-  @JvmField val unknownValues: Boolean = false
+  @JvmField val unknownValues: Boolean = false,
 ) {
-
   fun noContextTakeover(clientOriginated: Boolean): Boolean {
     return if (clientOriginated) {
       clientNoContextTakeover // Client is deflating.
@@ -127,11 +123,12 @@ data class WebSocketExtensions(
                 val parameterEnd = header.delimiterOffset(';', pos, extensionEnd)
                 val equals = header.delimiterOffset('=', pos, parameterEnd)
                 val name = header.trimSubstring(pos, equals)
-                val value = if (equals < parameterEnd) {
-                  header.trimSubstring(equals + 1, parameterEnd).removeSurrounding("\"")
-                } else {
-                  null
-                }
+                val value =
+                  if (equals < parameterEnd) {
+                    header.trimSubstring(equals + 1, parameterEnd).removeSurrounding("\"")
+                  } else {
+                    null
+                  }
                 pos = parameterEnd + 1
                 when {
                   name.equals("client_max_window_bits", ignoreCase = true) -> {
@@ -169,12 +166,12 @@ data class WebSocketExtensions(
       }
 
       return WebSocketExtensions(
-          perMessageDeflate = compressionEnabled,
-          clientMaxWindowBits = clientMaxWindowBits,
-          clientNoContextTakeover = clientNoContextTakeover,
-          serverMaxWindowBits = serverMaxWindowBits,
-          serverNoContextTakeover = serverNoContextTakeover,
-          unknownValues = unexpectedValues
+        perMessageDeflate = compressionEnabled,
+        clientMaxWindowBits = clientMaxWindowBits,
+        clientNoContextTakeover = clientNoContextTakeover,
+        serverMaxWindowBits = serverMaxWindowBits,
+        serverNoContextTakeover = serverNoContextTakeover,
+        unknownValues = unexpectedValues,
       )
     }
   }

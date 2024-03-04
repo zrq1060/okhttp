@@ -15,36 +15,44 @@
  */
 package okhttp3
 
+import assertk.assertThat
+import assertk.assertions.contains
+import assertk.assertions.containsExactly
+import assertk.assertions.isEqualTo
+import assertk.assertions.isNotEmpty
+import javax.net.ssl.SSLSocket
+import javax.net.ssl.SSLSocketFactory
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
 import okhttp3.TestUtil.assumeNetwork
 import okhttp3.internal.connection
 import okhttp3.testing.PlatformRule
 import okhttp3.testing.PlatformVersion
-import okhttp3.tls.internal.TlsUtil
 import okio.ByteString.Companion.toByteString
-import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotEquals
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Disabled
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.extension.RegisterExtension
-import javax.net.ssl.SSLSocket
-import javax.net.ssl.SSLSocketFactory
 
-class JSSETest(
-  val server: MockWebServer
-) {
-  @JvmField @RegisterExtension var platform = PlatformRule()
-  @JvmField @RegisterExtension val clientTestRule = OkHttpClientTestRule()
+class JSSETest {
+  @JvmField @RegisterExtension
+  var platform = PlatformRule()
 
-  private val handshakeCertificates = TlsUtil.localhost()
+  @JvmField @RegisterExtension
+  val clientTestRule = OkHttpClientTestRule()
+
+  private val handshakeCertificates = platform.localhostHandshakeCertificates()
 
   var client = clientTestRule.newClient()
 
+  private lateinit var server: MockWebServer
+
   @BeforeEach
-  fun setUp() {
+  fun setUp(server: MockWebServer) {
+    this.server = server
+
     // Default after JDK 14, but we are avoiding tests that assume special setup.
     // System.setProperty("jdk.tls.client.enableSessionTicketExtension", "true")
     // System.setProperty("jdk.tls.server.enableSessionTicketExtension", "true")
@@ -60,9 +68,9 @@ class JSSETest(
 
     enableTls()
 
-    server.enqueue(MockResponse().setBody("abc"))
+    server.enqueue(MockResponse(body = "abc"))
 
-    val request = Request.Builder().url(server.url("/")).build()
+    val request = Request(server.url("/"))
 
     val response = client.newCall(request).execute()
 
@@ -76,7 +84,7 @@ class JSSETest(
       }
 
       assertThat(response.connection.socket().javaClass.name).isEqualTo(
-        "sun.security.ssl.SSLSocketImpl"
+        "sun.security.ssl.SSLSocketImpl",
       )
     }
   }
@@ -88,21 +96,29 @@ class JSSETest(
     val s = factory.createSocket() as SSLSocket
 
     when {
-      PlatformVersion.majorVersion > 11 -> assertThat(s.enabledProtocols.toList()).containsExactly(
-        "TLSv1.3", "TLSv1.2"
-      )
+      PlatformVersion.majorVersion > 11 ->
+        assertThat(s.enabledProtocols.toList()).containsExactly(
+          "TLSv1.3",
+          "TLSv1.2",
+        )
       // Not much we can guarantee on JDK 11.
-      PlatformVersion.majorVersion == 11 -> assertThat(s.enabledProtocols.toList()).contains(
-        "TLSv1.2"
-      )
+      PlatformVersion.majorVersion == 11 ->
+        assertThat(s.enabledProtocols.toList()).contains(
+          "TLSv1.2",
+        )
       // JDK 8 291 removed older versions
       // See https://java.com/en/jre-jdk-cryptoroadmap.html
-      PlatformVersion.majorVersion == 8 -> assertThat(s.enabledProtocols.toList()).contains(
-        "TLSv1.2"
-      )
-      else -> assertThat(s.enabledProtocols.toList()).containsExactly(
-        "TLSv1.3", "TLSv1.2", "TLSv1.1", "TLSv1"
-      )
+      PlatformVersion.majorVersion == 8 ->
+        assertThat(s.enabledProtocols.toList()).contains(
+          "TLSv1.2",
+        )
+      else ->
+        assertThat(s.enabledProtocols.toList()).containsExactly(
+          "TLSv1.3",
+          "TLSv1.2",
+          "TLSv1.1",
+          "TLSv1",
+        )
     }
   }
 
@@ -113,15 +129,23 @@ class JSSETest(
 
     assumeNetwork()
 
-    client = client.newBuilder()
-      .eventListenerFactory(clientTestRule.wrap(object : EventListener() {
-        override fun connectionAcquired(call: Call, connection: Connection) {
-          val sslSocket = connection.socket() as SSLSocket
+    client =
+      client.newBuilder()
+        .eventListenerFactory(
+          clientTestRule.wrap(
+            object : EventListener() {
+              override fun connectionAcquired(
+                call: Call,
+                connection: Connection,
+              ) {
+                val sslSocket = connection.socket() as SSLSocket
 
-          sessionIds.add(sslSocket.session.id.toByteString().hex())
-        }
-      }))
-      .build()
+                sessionIds.add(sslSocket.session.id.toByteString().hex())
+              }
+            },
+          ),
+        )
+        .build()
 
     val request = Request.Builder().url("https://facebook.com/robots.txt").build()
 
@@ -140,15 +164,17 @@ class JSSETest(
 
     assertEquals(2, sessionIds.size)
     assertNotEquals(sessionIds[0], sessionIds[1])
-    assertThat(sessionIds[0]).isNotBlank()
+    assertThat(sessionIds[0]).isNotEmpty()
   }
 
   private fun enableTls() {
-    client = client.newBuilder()
-      .sslSocketFactory(
-        handshakeCertificates.sslSocketFactory(), handshakeCertificates.trustManager
-      )
-      .build()
-    server.useHttps(handshakeCertificates.sslSocketFactory(), false)
+    client =
+      client.newBuilder()
+        .sslSocketFactory(
+          handshakeCertificates.sslSocketFactory(),
+          handshakeCertificates.trustManager,
+        )
+        .build()
+    server.useHttps(handshakeCertificates.sslSocketFactory())
   }
 }

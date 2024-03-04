@@ -15,14 +15,17 @@
  */
 package okhttp3
 
+import assertk.assertThat
+import assertk.assertions.containsExactlyInAnyOrder
+import assertk.assertions.isEmpty
+import assertk.assertions.isNotEmpty
+import javax.net.ssl.SSLSocket
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
 import okhttp3.testing.Flaky
 import okhttp3.testing.PlatformRule
 import okhttp3.testing.PlatformVersion
-import okhttp3.tls.internal.TlsUtil
 import okio.ByteString.Companion.toByteString
-import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotEquals
 import org.junit.jupiter.api.Assumptions.assumeTrue
@@ -30,23 +33,30 @@ import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.extension.RegisterExtension
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
-import javax.net.ssl.SSLSocket
 
-class SessionReuseTest(
-  val server: MockWebServer
-) {
-  @JvmField @RegisterExtension var platform = PlatformRule()
-  @JvmField @RegisterExtension val clientTestRule = OkHttpClientTestRule()
+class SessionReuseTest {
+  @JvmField @RegisterExtension
+  var platform = PlatformRule()
 
-  private val handshakeCertificates = TlsUtil.localhost()
+  @JvmField @RegisterExtension
+  val clientTestRule = OkHttpClientTestRule()
+
+  private val handshakeCertificates = platform.localhostHandshakeCertificates()
 
   var client = clientTestRule.newClient()
 
+  private lateinit var server: MockWebServer
+
   @BeforeEach
-  fun setUp() {
+  fun setUp(server: MockWebServer) {
+    this.server = server
+
     // Default after JDK 14, but we are avoiding tests that assume special setup.
     // System.setProperty("jdk.tls.client.enableSessionTicketExtension", "true")
     // System.setProperty("jdk.tls.server.enableSessionTicketExtension", "true")
+
+    // IllegalStateException: Cannot resume session and session creation is disabled
+    platform.assumeNotBouncyCastle()
   }
 
   @ParameterizedTest(name = "{displayName}({arguments})")
@@ -62,40 +72,50 @@ class SessionReuseTest(
     enableTls()
 
     val tlsVersion = TlsVersion.forJavaName(tlsVersion)
-    val spec = ConnectionSpec.Builder(ConnectionSpec.MODERN_TLS)
-      .tlsVersions(tlsVersion)
-      .build()
+    val spec =
+      ConnectionSpec.Builder(ConnectionSpec.MODERN_TLS)
+        .tlsVersions(tlsVersion)
+        .build()
 
     var reuseSession = false
 
     val sslContext = handshakeCertificates.sslContext()
     val systemSslSocketFactory = sslContext.socketFactory
-    val sslSocketFactory = object : DelegatingSSLSocketFactory(systemSslSocketFactory) {
-      override fun configureSocket(sslSocket: SSLSocket): SSLSocket {
-        return sslSocket.apply {
-          if (reuseSession) {
-            this.enableSessionCreation = false
+    val sslSocketFactory =
+      object : DelegatingSSLSocketFactory(systemSslSocketFactory) {
+        override fun configureSocket(sslSocket: SSLSocket): SSLSocket {
+          return sslSocket.apply {
+            if (reuseSession) {
+              this.enableSessionCreation = false
+            }
           }
         }
       }
-    }
 
-    client = client.newBuilder()
-      .connectionSpecs(listOf(spec))
-      .eventListenerFactory(clientTestRule.wrap(object : EventListener() {
-        override fun connectionAcquired(call: Call, connection: Connection) {
-          val sslSocket = connection.socket() as SSLSocket
+    client =
+      client.newBuilder()
+        .connectionSpecs(listOf(spec))
+        .eventListenerFactory(
+          clientTestRule.wrap(
+            object : EventListener() {
+              override fun connectionAcquired(
+                call: Call,
+                connection: Connection,
+              ) {
+                val sslSocket = connection.socket() as SSLSocket
 
-          sessionIds.add(sslSocket.session.id.toByteString().hex())
-        }
-      }))
-      .sslSocketFactory(sslSocketFactory, handshakeCertificates.trustManager)
-      .build()
+                sessionIds.add(sslSocket.session.id.toByteString().hex())
+              }
+            },
+          ),
+        )
+        .sslSocketFactory(sslSocketFactory, handshakeCertificates.trustManager)
+        .build()
 
-    server.enqueue(MockResponse().setBody("abc1"))
-    server.enqueue(MockResponse().setBody("abc2"))
+    server.enqueue(MockResponse(body = "abc1"))
+    server.enqueue(MockResponse(body = "abc2"))
 
-    val request = Request.Builder().url(server.url("/")).build()
+    val request = Request(server.url("/"))
 
     client.newCall(request).execute().use { response ->
       assertEquals(200, response.code)
@@ -124,14 +144,14 @@ class SessionReuseTest(
 
     if (platform.isConscrypt()) {
       if (tlsVersion == TlsVersion.TLS_1_3) {
-        assertThat(sessionIds[0]).isBlank()
-        assertThat(sessionIds[1]).isBlank()
+        assertThat(sessionIds[0]).isEmpty()
+        assertThat(sessionIds[1]).isEmpty()
 
         // https://github.com/google/conscrypt/issues/985
         // assertThat(directSessionIds).containsExactlyInAnyOrder(sessionIds[0], sessionIds[1])
       } else {
-        assertThat(sessionIds[0]).isNotBlank()
-        assertThat(sessionIds[1]).isNotBlank()
+        assertThat(sessionIds[0]).isNotEmpty()
+        assertThat(sessionIds[1]).isNotEmpty()
 
         assertThat(directSessionIds).containsExactlyInAnyOrder(sessionIds[1])
       }
@@ -144,16 +164,18 @@ class SessionReuseTest(
         // assertEquals(sessionIds[0], sessionIds[1])
         // assertThat(directSessionIds).contains(sessionIds[0], sessionIds[1])
       }
-      assertThat(sessionIds[0]).isNotBlank()
+      assertThat(sessionIds[0]).isNotEmpty()
     }
   }
 
   private fun enableTls() {
-    client = client.newBuilder()
-      .sslSocketFactory(
-        handshakeCertificates.sslSocketFactory(), handshakeCertificates.trustManager
-      )
-      .build()
-    server.useHttps(handshakeCertificates.sslSocketFactory(), false)
+    client =
+      client.newBuilder()
+        .sslSocketFactory(
+          handshakeCertificates.sslSocketFactory(),
+          handshakeCertificates.trustManager,
+        )
+        .build()
+    server.useHttps(handshakeCertificates.sslSocketFactory())
   }
 }

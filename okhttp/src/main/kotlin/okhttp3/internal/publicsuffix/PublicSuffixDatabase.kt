@@ -18,22 +18,25 @@ package okhttp3.internal.publicsuffix
 import java.io.IOException
 import java.io.InterruptedIOException
 import java.net.IDN
-import java.nio.charset.StandardCharsets.UTF_8
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.atomic.AtomicBoolean
 import okhttp3.internal.and
 import okhttp3.internal.platform.Platform
+import okio.FileSystem
 import okio.GzipSource
+import okio.Path
+import okio.Path.Companion.toPath
 import okio.buffer
-import okio.source
 
 /**
  * A database of public suffixes provided by [publicsuffix.org][publicsuffix_org].
  *
  * [publicsuffix_org]: https://publicsuffix.org/
  */
-class PublicSuffixDatabase {
-
+class PublicSuffixDatabase internal constructor(
+  val path: Path = PUBLIC_SUFFIX_RESOURCE,
+  val fileSystem: FileSystem = FileSystem.RESOURCES,
+) {
   /** True after we've attempted to read the list for the first time. */
   private val listRead = AtomicBoolean(false)
 
@@ -74,13 +77,14 @@ class PublicSuffixDatabase {
       return null // The domain is a public suffix.
     }
 
-    val firstLabelOffset = if (rule[0][0] == EXCEPTION_MARKER) {
-      // Exception rules hold the effective TLD plus one.
-      domainLabels.size - rule.size
-    } else {
-      // Otherwise the rule is for a public suffix, so we must take one more label.
-      domainLabels.size - (rule.size + 1)
-    }
+    val firstLabelOffset =
+      if (rule[0][0] == EXCEPTION_MARKER) {
+        // Exception rules hold the effective TLD plus one.
+        domainLabels.size - rule.size
+      } else {
+        // Otherwise the rule is for a public suffix, so we must take one more label.
+        domainLabels.size - (rule.size + 1)
+      }
 
     return splitDomain(domain).asSequence().drop(firstLabelOffset).joinToString(".")
   }
@@ -108,11 +112,12 @@ class PublicSuffixDatabase {
     }
 
     check(::publicSuffixListBytes.isInitialized) {
+      // May have failed with an IOException
       "Unable to load $PUBLIC_SUFFIX_RESOURCE resource from the classpath."
     }
 
     // Break apart the domain into UTF-8 labels, i.e. foo.bar.com turns into [foo, bar, com].
-    val domainLabelsUtf8Bytes = Array(domainLabels.size) { i -> domainLabels[i].toByteArray(UTF_8) }
+    val domainLabelsUtf8Bytes = Array(domainLabels.size) { i -> domainLabels[i].toByteArray() }
 
     // Start by looking for exact matches. We start at the leftmost label. For example, foo.bar.com
     // will look like: [foo, bar, com], [bar, com], [com]. The longest matching rule wins.
@@ -147,8 +152,11 @@ class PublicSuffixDatabase {
     var exception: String? = null
     if (wildcardMatch != null) {
       for (labelIndex in 0 until domainLabelsUtf8Bytes.size - 1) {
-        val rule = publicSuffixExceptionListBytes.binarySearch(
-            domainLabelsUtf8Bytes, labelIndex)
+        val rule =
+          publicSuffixExceptionListBytes.binarySearch(
+            domainLabelsUtf8Bytes,
+            labelIndex,
+          )
         if (rule != null) {
           exception = rule
           break
@@ -206,29 +214,28 @@ class PublicSuffixDatabase {
     var publicSuffixListBytes: ByteArray?
     var publicSuffixExceptionListBytes: ByteArray?
 
-    val resource =
-        PublicSuffixDatabase::class.java.getResourceAsStream(PUBLIC_SUFFIX_RESOURCE) ?: return
+    try {
+      GzipSource(fileSystem.source(path)).buffer().use { bufferedSource ->
+        val totalBytes = bufferedSource.readInt()
+        publicSuffixListBytes = bufferedSource.readByteArray(totalBytes.toLong())
 
-    GzipSource(resource.source()).buffer().use { bufferedSource ->
-      val totalBytes = bufferedSource.readInt()
-      publicSuffixListBytes = bufferedSource.readByteArray(totalBytes.toLong())
+        val totalExceptionBytes = bufferedSource.readInt()
+        publicSuffixExceptionListBytes = bufferedSource.readByteArray(totalExceptionBytes.toLong())
+      }
 
-      val totalExceptionBytes = bufferedSource.readInt()
-      publicSuffixExceptionListBytes = bufferedSource.readByteArray(totalExceptionBytes.toLong())
+      synchronized(this) {
+        this.publicSuffixListBytes = publicSuffixListBytes!!
+        this.publicSuffixExceptionListBytes = publicSuffixExceptionListBytes!!
+      }
+    } finally {
+      readCompleteLatch.countDown()
     }
-
-    synchronized(this) {
-      this.publicSuffixListBytes = publicSuffixListBytes!!
-      this.publicSuffixExceptionListBytes = publicSuffixExceptionListBytes!!
-    }
-
-    readCompleteLatch.countDown()
   }
 
   /** Visible for testing. */
   fun setListBytes(
     publicSuffixListBytes: ByteArray,
-    publicSuffixExceptionListBytes: ByteArray
+    publicSuffixExceptionListBytes: ByteArray,
   ) {
     this.publicSuffixListBytes = publicSuffixListBytes
     this.publicSuffixExceptionListBytes = publicSuffixExceptionListBytes
@@ -237,7 +244,8 @@ class PublicSuffixDatabase {
   }
 
   companion object {
-    const val PUBLIC_SUFFIX_RESOURCE = "publicsuffixes.gz"
+    @JvmField
+    val PUBLIC_SUFFIX_RESOURCE = "/okhttp3/internal/publicsuffix/${PublicSuffixDatabase::class.java.simpleName}.gz".toPath()
 
     private val WILDCARD_LABEL = byteArrayOf('*'.code.toByte())
     private val PREVAILING_RULE = listOf("*")
@@ -252,7 +260,7 @@ class PublicSuffixDatabase {
 
     private fun ByteArray.binarySearch(
       labels: Array<ByteArray>,
-      labelIndex: Int
+      labelIndex: Int,
     ): String? {
       var low = 0
       var high = size
@@ -330,7 +338,7 @@ class PublicSuffixDatabase {
             low = mid + end + 1
           } else {
             // Found a match.
-            match = String(this, mid, publicSuffixLength, UTF_8)
+            match = String(this, mid, publicSuffixLength)
             break
           }
         }

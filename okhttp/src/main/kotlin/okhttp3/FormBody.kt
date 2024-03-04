@@ -17,30 +17,32 @@ package okhttp3
 
 import java.io.IOException
 import java.nio.charset.Charset
-import okhttp3.HttpUrl.Companion.FORM_ENCODE_SET
-import okhttp3.HttpUrl.Companion.canonicalize
-import okhttp3.HttpUrl.Companion.percentDecode
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.internal.toImmutableList
+import okhttp3.internal.url.FORM_ENCODE_SET
+import okhttp3.internal.url.canonicalizeWithCharset
+import okhttp3.internal.url.percentDecode
 import okio.Buffer
 import okio.BufferedSink
 
 class FormBody internal constructor(
   encodedNames: List<String>,
-  encodedValues: List<String>
+  encodedValues: List<String>,
 ) : RequestBody() {
   private val encodedNames: List<String> = encodedNames.toImmutableList()
   private val encodedValues: List<String> = encodedValues.toImmutableList()
 
   /** The number of key-value pairs in this form-encoded body. */
-  @get:JvmName("size") val size: Int
+  @get:JvmName("size")
+  val size: Int
     get() = encodedNames.size
 
   @JvmName("-deprecated_size")
   @Deprecated(
-      message = "moved to val",
-      replaceWith = ReplaceWith(expression = "size"),
-      level = DeprecationLevel.ERROR)
+    message = "moved to val",
+    replaceWith = ReplaceWith(expression = "size"),
+    level = DeprecationLevel.ERROR,
+  )
   fun size(): Int = size
 
   fun encodedName(index: Int): String = encodedNames[index]
@@ -66,7 +68,10 @@ class FormBody internal constructor(
    * to awkward operations like measuring the encoded length of header strings, or the
    * length-in-digits of an encoded integer.
    */
-  private fun writeOrCountBytes(sink: BufferedSink?, countBytes: Boolean): Long {
+  private fun writeOrCountBytes(
+    sink: BufferedSink?,
+    countBytes: Boolean,
+  ): Long {
     var byteCount = 0L
     val buffer: Buffer = if (countBytes) Buffer() else sink!!.buffer
 
@@ -85,40 +90,54 @@ class FormBody internal constructor(
     return byteCount
   }
 
-  class Builder @JvmOverloads constructor(private val charset: Charset? = null) {
-    private val names = mutableListOf<String>()
-    private val values = mutableListOf<String>()
+  class Builder
+    @JvmOverloads
+    constructor(private val charset: Charset? = null) {
+      private val names = mutableListOf<String>()
+      private val values = mutableListOf<String>()
 
-    fun add(name: String, value: String) = apply {
-      names += name.canonicalize(
-          encodeSet = FORM_ENCODE_SET,
-          plusIsSpace = false, // plus is encoded as `%2B`, space is encoded as plus.
-          charset = charset
-      )
-      values += value.canonicalize(
-          encodeSet = FORM_ENCODE_SET,
-          plusIsSpace = false, // plus is encoded as `%2B`, space is encoded as plus.
-          charset = charset
-      )
+      fun add(
+        name: String,
+        value: String,
+      ) = apply {
+        names +=
+          name.canonicalizeWithCharset(
+            encodeSet = FORM_ENCODE_SET,
+            // Plus is encoded as `%2B`, space is encoded as plus.
+            plusIsSpace = false,
+            charset = charset,
+          )
+        values +=
+          value.canonicalizeWithCharset(
+            encodeSet = FORM_ENCODE_SET,
+            // Plus is encoded as `%2B`, space is encoded as plus.
+            plusIsSpace = false,
+            charset = charset,
+          )
+      }
+
+      fun addEncoded(
+        name: String,
+        value: String,
+      ) = apply {
+        names +=
+          name.canonicalizeWithCharset(
+            encodeSet = FORM_ENCODE_SET,
+            alreadyEncoded = true,
+            plusIsSpace = true,
+            charset = charset,
+          )
+        values +=
+          value.canonicalizeWithCharset(
+            encodeSet = FORM_ENCODE_SET,
+            alreadyEncoded = true,
+            plusIsSpace = true,
+            charset = charset,
+          )
+      }
+
+      fun build(): FormBody = FormBody(names, values)
     }
-
-    fun addEncoded(name: String, value: String) = apply {
-      names += name.canonicalize(
-          encodeSet = FORM_ENCODE_SET,
-          alreadyEncoded = true,
-          plusIsSpace = true,
-          charset = charset
-      )
-      values += value.canonicalize(
-          encodeSet = FORM_ENCODE_SET,
-          alreadyEncoded = true,
-          plusIsSpace = true,
-          charset = charset
-      )
-    }
-
-    fun build(): FormBody = FormBody(names, values)
-  }
 
   companion object {
     private val CONTENT_TYPE: MediaType = "application/x-www-form-urlencoded".toMediaType()

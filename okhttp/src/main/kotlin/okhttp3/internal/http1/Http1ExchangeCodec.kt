@@ -26,13 +26,12 @@ import okhttp3.Request
 import okhttp3.Response
 import okhttp3.internal.EMPTY_HEADERS
 import okhttp3.internal.checkOffsetAndCount
-import okhttp3.internal.connection.RealConnection
 import okhttp3.internal.discard
 import okhttp3.internal.headersContentLength
 import okhttp3.internal.http.ExchangeCodec
+import okhttp3.internal.http.HTTP_CONTINUE
 import okhttp3.internal.http.RequestLine
 import okhttp3.internal.http.StatusLine
-import okhttp3.internal.http.StatusLine.Companion.HTTP_CONTINUE
 import okhttp3.internal.http.promisesBody
 import okhttp3.internal.http.receiveHeaders
 import okhttp3.internal.skipAll
@@ -64,19 +63,18 @@ import okio.Timeout
 class Http1ExchangeCodec(
   /** The client that configures this stream. May be null for HTTPS proxy tunnels. */
   private val client: OkHttpClient?,
-  /** The connection that carries this stream. */
-  override val connection: RealConnection,
+  override val carrier: ExchangeCodec.Carrier,
   private val source: BufferedSource,
-  private val sink: BufferedSink
+  private val sink: BufferedSink,
 ) : ExchangeCodec {
   private var state = STATE_IDLE
   private val headersReader = HeadersReader(source)
 
   private val Response.isChunked: Boolean
-      get() = "chunked".equals(header("Transfer-Encoding"), ignoreCase = true)
+    get() = "chunked".equals(header("Transfer-Encoding"), ignoreCase = true)
 
   private val Request.isChunked: Boolean
-      get() = "chunked".equals(header("Transfer-Encoding"), ignoreCase = true)
+    get() = "chunked".equals(header("Transfer-Encoding"), ignoreCase = true)
 
   /**
    * Received trailers. Null unless the response body uses chunked transfer-encoding and includes
@@ -88,20 +86,25 @@ class Http1ExchangeCodec(
   val isClosed: Boolean
     get() = state == STATE_CLOSED
 
-  override fun createRequestBody(request: Request, contentLength: Long): Sink {
+  override fun createRequestBody(
+    request: Request,
+    contentLength: Long,
+  ): Sink {
     return when {
-      request.body != null && request.body.isDuplex() -> throw ProtocolException(
-          "Duplex connections are not supported for HTTP/1")
+      request.body?.isDuplex() == true -> throw ProtocolException(
+        "Duplex connections are not supported for HTTP/1",
+      )
       request.isChunked -> newChunkedSink() // Stream a request body of unknown length.
       contentLength != -1L -> newKnownLengthSink() // Stream a request body of a known length.
       else -> // Stream a request body of a known length.
         throw IllegalStateException(
-            "Cannot stream a request body without chunked encoding or a known content length!")
+          "Cannot stream a request body without chunked encoding or a known content length!",
+        )
     }
   }
 
   override fun cancel() {
-    connection.cancel()
+    carrier.cancel()
   }
 
   /**
@@ -115,7 +118,7 @@ class Http1ExchangeCodec(
    * the proper value.
    */
   override fun writeRequestHeaders(request: Request) {
-    val requestLine = RequestLine.get(request, connection.route().proxy.type())
+    val requestLine = RequestLine.get(request, carrier.route.proxy.type())
     writeRequest(request.headers, requestLine)
   }
 
@@ -156,40 +159,53 @@ class Http1ExchangeCodec(
   }
 
   /** Returns bytes of a request header for sending on an HTTP transport. */
-  fun writeRequest(headers: Headers, requestLine: String) {
+  fun writeRequest(
+    headers: Headers,
+    requestLine: String,
+  ) {
     check(state == STATE_IDLE) { "state: $state" }
     sink.writeUtf8(requestLine).writeUtf8("\r\n")
     for (i in 0 until headers.size) {
       sink.writeUtf8(headers.name(i))
-          .writeUtf8(": ")
-          .writeUtf8(headers.value(i))
-          .writeUtf8("\r\n")
+        .writeUtf8(": ")
+        .writeUtf8(headers.value(i))
+        .writeUtf8("\r\n")
     }
     sink.writeUtf8("\r\n")
     state = STATE_OPEN_REQUEST_BODY
   }
 
   override fun readResponseHeaders(expectContinue: Boolean): Response.Builder? {
-    check(state == STATE_OPEN_REQUEST_BODY ||
+    check(
+      state == STATE_OPEN_REQUEST_BODY ||
         state == STATE_WRITING_REQUEST_BODY ||
-        state == STATE_READ_RESPONSE_HEADERS) {
+        state == STATE_READ_RESPONSE_HEADERS,
+    ) {
       "state: $state"
     }
 
     try {
       val statusLine = StatusLine.parse(headersReader.readLine())
 
-      val responseBuilder = Response.Builder()
+      val responseBuilder =
+        Response.Builder()
           .protocol(statusLine.protocol)
           .code(statusLine.code)
           .message(statusLine.message)
           .headers(headersReader.readHeaders())
+          .trailers { error("trailers not available") }
 
       return when {
         expectContinue && statusLine.code == HTTP_CONTINUE -> {
           null
         }
         statusLine.code == HTTP_CONTINUE -> {
+          state = STATE_READ_RESPONSE_HEADERS
+          responseBuilder
+        }
+        statusLine.code in (102 until 200) -> {
+          // Processing and Early Hints will mean a second headers are coming.
+          // Treat others the same for now
           state = STATE_READ_RESPONSE_HEADERS
           responseBuilder
         }
@@ -200,7 +216,7 @@ class Http1ExchangeCodec(
       }
     } catch (e: EOFException) {
       // Provide more context if the server ends the stream before sending a response.
-      val address = connection.route().address.url.redact()
+      val address = carrier.route.address.url.redact()
       throw IOException("unexpected end of stream on $address", e)
     }
   }
@@ -232,7 +248,7 @@ class Http1ExchangeCodec(
   private fun newUnknownLengthSource(): Source {
     check(state == STATE_OPEN_RESPONSE_BODY) { "state: $state" }
     state = STATE_READING_RESPONSE_BODY
-    connection.noNewExchanges()
+    carrier.noNewExchanges()
     return UnknownLengthSource()
   }
 
@@ -267,7 +283,10 @@ class Http1ExchangeCodec(
 
     override fun timeout(): Timeout = timeout
 
-    override fun write(source: Buffer, byteCount: Long) {
+    override fun write(
+      source: Buffer,
+      byteCount: Long,
+    ) {
       check(!closed) { "closed" }
       checkOffsetAndCount(source.size, 0, byteCount)
       sink.write(source, byteCount)
@@ -296,7 +315,10 @@ class Http1ExchangeCodec(
 
     override fun timeout(): Timeout = timeout
 
-    override fun write(source: Buffer, byteCount: Long) {
+    override fun write(
+      source: Buffer,
+      byteCount: Long,
+    ) {
       check(!closed) { "closed" }
       if (byteCount == 0L) return
 
@@ -328,11 +350,14 @@ class Http1ExchangeCodec(
 
     override fun timeout(): Timeout = timeout
 
-    override fun read(sink: Buffer, byteCount: Long): Long {
+    override fun read(
+      sink: Buffer,
+      byteCount: Long,
+    ): Long {
       return try {
         source.read(sink, byteCount)
       } catch (e: IOException) {
-        connection.noNewExchanges()
+        carrier.noNewExchanges()
         responseBodyComplete()
         throw e
       }
@@ -354,22 +379,24 @@ class Http1ExchangeCodec(
 
   /** An HTTP body with a fixed length specified in advance. */
   private inner class FixedLengthSource(private var bytesRemaining: Long) :
-      AbstractSource() {
-
+    AbstractSource() {
     init {
       if (bytesRemaining == 0L) {
         responseBodyComplete()
       }
     }
 
-    override fun read(sink: Buffer, byteCount: Long): Long {
+    override fun read(
+      sink: Buffer,
+      byteCount: Long,
+    ): Long {
       require(byteCount >= 0L) { "byteCount < 0: $byteCount" }
       check(!closed) { "closed" }
       if (bytesRemaining == 0L) return -1
 
       val read = super.read(sink, minOf(bytesRemaining, byteCount))
       if (read == -1L) {
-        connection.noNewExchanges() // The server didn't supply the promised content length.
+        carrier.noNewExchanges() // The server didn't supply the promised content length.
         val e = ProtocolException("unexpected end of stream")
         responseBodyComplete()
         throw e
@@ -386,8 +413,9 @@ class Http1ExchangeCodec(
       if (closed) return
 
       if (bytesRemaining != 0L &&
-          !discard(ExchangeCodec.DISCARD_STREAM_TIMEOUT_MILLIS, MILLISECONDS)) {
-        connection.noNewExchanges() // Unread bytes remain on the stream.
+        !discard(ExchangeCodec.DISCARD_STREAM_TIMEOUT_MILLIS, MILLISECONDS)
+      ) {
+        carrier.noNewExchanges() // Unread bytes remain on the stream.
         responseBodyComplete()
       }
 
@@ -397,11 +425,14 @@ class Http1ExchangeCodec(
 
   /** An HTTP body with alternating chunk sizes and chunk bodies. */
   private inner class ChunkedSource(private val url: HttpUrl) :
-      AbstractSource() {
+    AbstractSource() {
     private var bytesRemainingInChunk = NO_CHUNK_YET
     private var hasMoreChunks = true
 
-    override fun read(sink: Buffer, byteCount: Long): Long {
+    override fun read(
+      sink: Buffer,
+      byteCount: Long,
+    ): Long {
       require(byteCount >= 0L) { "byteCount < 0: $byteCount" }
       check(!closed) { "closed" }
       if (!hasMoreChunks) return -1
@@ -413,7 +444,7 @@ class Http1ExchangeCodec(
 
       val read = super.read(sink, minOf(byteCount, bytesRemainingInChunk))
       if (read == -1L) {
-        connection.noNewExchanges() // The server didn't supply the promised chunk length.
+        carrier.noNewExchanges() // The server didn't supply the promised chunk length.
         val e = ProtocolException("unexpected end of stream")
         responseBodyComplete()
         throw e
@@ -431,8 +462,10 @@ class Http1ExchangeCodec(
         bytesRemainingInChunk = source.readHexadecimalUnsignedLong()
         val extensions = source.readUtf8LineStrict().trim()
         if (bytesRemainingInChunk < 0L || extensions.isNotEmpty() && !extensions.startsWith(";")) {
-          throw ProtocolException("expected chunk size and optional extensions" +
-              " but was \"$bytesRemainingInChunk$extensions\"")
+          throw ProtocolException(
+            "expected chunk size and optional extensions" +
+              " but was \"$bytesRemainingInChunk$extensions\"",
+          )
         }
       } catch (e: NumberFormatException) {
         throw ProtocolException(e.message)
@@ -449,8 +482,9 @@ class Http1ExchangeCodec(
     override fun close() {
       if (closed) return
       if (hasMoreChunks &&
-          !discard(ExchangeCodec.DISCARD_STREAM_TIMEOUT_MILLIS, MILLISECONDS)) {
-        connection.noNewExchanges() // Unread bytes remain on the stream.
+        !discard(ExchangeCodec.DISCARD_STREAM_TIMEOUT_MILLIS, MILLISECONDS)
+      ) {
+        carrier.noNewExchanges() // Unread bytes remain on the stream.
         responseBodyComplete()
       }
       closed = true
@@ -461,7 +495,10 @@ class Http1ExchangeCodec(
   private inner class UnknownLengthSource : AbstractSource() {
     private var inputExhausted: Boolean = false
 
-    override fun read(sink: Buffer, byteCount: Long): Long {
+    override fun read(
+      sink: Buffer,
+      byteCount: Long,
+    ): Long {
       require(byteCount >= 0L) { "byteCount < 0: $byteCount" }
       check(!closed) { "closed" }
       if (inputExhausted) return -1

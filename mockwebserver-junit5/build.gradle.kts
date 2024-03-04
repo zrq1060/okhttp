@@ -1,3 +1,13 @@
+import com.vanniktech.maven.publish.JavadocJar
+import com.vanniktech.maven.publish.KotlinJvm
+
+plugins {
+  kotlin("jvm")
+  id("org.jetbrains.dokka")
+  id("com.vanniktech.maven.publish.base")
+  id("binary-compatibility-validator")
+}
+
 tasks {
   jar {
     manifest {
@@ -11,18 +21,16 @@ tasks {
 }
 
 dependencies {
-  api(project(":mockwebserver"))
-  api(Dependencies.junit5Api)
-  compileOnly(Dependencies.animalSniffer)
+  api(projects.mockwebserver3)
+  api(libs.junit.jupiter.api)
+  compileOnly(libs.animalsniffer.annotations)
 
-  testRuntimeOnly(Dependencies.junit5JupiterEngine)
-  testImplementation(Dependencies.assertj)
-  testImplementation(Dependencies.kotlinJunit5)
+  testRuntimeOnly(libs.junit.jupiter.engine)
+  testImplementation(libs.kotlin.junit5)
+  testImplementation(projects.okhttpTestingSupport)
+  testImplementation(libs.assertk)
 }
 
-afterEvaluate {
-  tasks.dokka {
-    outputDirectory = "$rootDir/docs/4.x"
-    outputFormat = "gfm"
-  }
+mavenPublishing {
+  configure(KotlinJvm(javadocJar = JavadocJar.Empty()))
 }

@@ -15,14 +15,16 @@
  */
 package okhttp3.internal.ws
 
+import assertk.assertThat
+import assertk.assertions.isEqualTo
+import assertk.assertions.isLessThan
 import java.io.EOFException
+import kotlin.test.assertFailsWith
 import okhttp3.TestUtil.fragmentBuffer
 import okio.Buffer
 import okio.ByteString
 import okio.ByteString.Companion.decodeHex
 import okio.ByteString.Companion.encodeUtf8
-import org.assertj.core.api.Assertions.assertThat
-import org.junit.jupiter.api.Assertions.fail
 import org.junit.jupiter.api.Test
 
 internal class MessageDeflaterInflaterTest {
@@ -30,6 +32,16 @@ internal class MessageDeflaterInflaterTest {
     val inflater = MessageInflater(false)
     val message = "f248cdc9c957c8cc4bcb492cc9cccf530400".decodeHex()
     assertThat(inflater.inflate(message)).isEqualTo("Hello inflation!".encodeUtf8())
+  }
+
+  /**
+   * We had a bug where self-finishing inflater streams would infinite loop!
+   * https://github.com/square/okhttp/issues/8078
+   */
+  @Test fun `inflate returns finished before bytesRead reaches input length`() {
+    val inflater = MessageInflater(false)
+    val message = "53621260020000".decodeHex()
+    assertThat(inflater.inflate(message)).isEqualTo("22021002".decodeHex())
   }
 
   @Test fun `deflate golden value`() {
@@ -98,10 +110,8 @@ internal class MessageDeflaterInflaterTest {
     val deflater = MessageDeflater(true)
     deflater.close()
 
-    try {
+    assertFailsWith<Exception> {
       deflater.deflate("Hello deflate!".encodeUtf8())
-      fail()
-    } catch (expected: Exception) {
     }
   }
 
@@ -110,10 +120,8 @@ internal class MessageDeflaterInflaterTest {
 
     inflater.close()
 
-    try {
+    assertFailsWith<Exception> {
       inflater.inflate("f240e30300".decodeHex())
-      fail()
-    } catch (expected: Exception) {
     }
   }
 

@@ -19,7 +19,8 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 
 fun main() {
-  val client = OkHttpClient.Builder()
+  val client =
+    OkHttpClient.Builder()
       .addInterceptor(BrotliInterceptor)
       .build()
 
@@ -27,10 +28,13 @@ fun main() {
   sendRequest("https://httpbin.org/gzip", client)
 }
 
-private fun sendRequest(url: String, client: OkHttpClient) {
+private fun sendRequest(
+  url: String,
+  client: OkHttpClient,
+) {
   val req = Request.Builder().url(url).build()
 
   client.newCall(req).execute().use {
-    println(it.body?.string())
+    println(it.body.string())
   }
 }

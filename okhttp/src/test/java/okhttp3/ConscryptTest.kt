@@ -15,11 +15,14 @@
  */
 package okhttp3
 
+import assertk.assertThat
+import assertk.assertions.isEqualTo
+import assertk.assertions.isNotNull
+import assertk.assertions.isTrue
 import okhttp3.TestUtil.assumeNetwork
 import okhttp3.internal.platform.ConscryptPlatform
 import okhttp3.internal.platform.Platform
 import okhttp3.testing.PlatformRule
-import org.assertj.core.api.Assertions.assertThat
 import org.conscrypt.Conscrypt
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -29,8 +32,11 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.extension.RegisterExtension
 
 class ConscryptTest {
-  @JvmField @RegisterExtension val platform = PlatformRule()
-  @JvmField @RegisterExtension val clientTestRule = OkHttpClientTestRule()
+  @JvmField @RegisterExtension
+  val platform = PlatformRule()
+
+  @JvmField @RegisterExtension
+  val clientTestRule = OkHttpClientTestRule()
 
   private val client = clientTestRule.newClient()
 
@@ -75,7 +81,7 @@ class ConscryptTest {
   @Test
   fun testBuildIfSupported() {
     val actual = ConscryptPlatform.buildIfSupported()
-    assertThat(actual).isNotNull
+    assertThat(actual).isNotNull()
   }
 
   @Test

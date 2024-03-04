@@ -21,8 +21,8 @@ import okhttp3.Cookie
 import okhttp3.CookieJar
 import okhttp3.Interceptor
 import okhttp3.Response
+import okhttp3.internal.USER_AGENT
 import okhttp3.internal.toHostHeader
-import okhttp3.internal.userAgent
 import okio.GzipSource
 import okio.buffer
 
@@ -32,7 +32,6 @@ import okio.buffer
  * response.
  */
 class BridgeInterceptor(private val cookieJar: CookieJar) : Interceptor {
-
   @Throws(IOException::class)
   override fun intercept(chain: Interceptor.Chain): Response {
     val userRequest = chain.request()
@@ -92,26 +91,29 @@ class BridgeInterceptor(private val cookieJar: CookieJar) : Interceptor {
     }
 
     if (userRequest.header("User-Agent") == null) {
-      // 增加用户标识信息
-      requestBuilder.header("User-Agent", userAgent)
+    // 增加用户标识信息
+      requestBuilder.header("User-Agent", USER_AGENT)
     }
 
+    val networkRequest = requestBuilder.build()
     // 进行请求
-    val networkResponse = chain.proceed(requestBuilder.build())
-
+    val networkResponse = chain.proceed(networkRequest)
     // 存储服务端返回的coockie
-    cookieJar.receiveHeaders(userRequest.url, networkResponse.headers)
+    cookieJar.receiveHeaders(networkRequest.url, networkResponse.headers)
 
-    val responseBuilder = networkResponse.newBuilder()
-        .request(userRequest)
+    val responseBuilder =
+      networkResponse.newBuilder()
+        .request(networkRequest)
 
     if (transparentGzip &&
-        "gzip".equals(networkResponse.header("Content-Encoding"), ignoreCase = true) &&
-        networkResponse.promisesBody()) {
+      "gzip".equals(networkResponse.header("Content-Encoding"), ignoreCase = true) &&
+      networkResponse.promisesBody()
+    ) {
       val responseBody = networkResponse.body
       if (responseBody != null) {
         val gzipSource = GzipSource(responseBody.source())
-        val strippedHeaders = networkResponse.headers.newBuilder()
+        val strippedHeaders =
+          networkResponse.headers.newBuilder()
             .removeAll("Content-Encoding")
             .removeAll("Content-Length")
             .build()
@@ -126,10 +128,11 @@ class BridgeInterceptor(private val cookieJar: CookieJar) : Interceptor {
   }
 
   /** Returns a 'Cookie' HTTP request header with all cookies, like `a=b; c=d`. */
-  private fun cookieHeader(cookies: List<Cookie>): String = buildString {
-    cookies.forEachIndexed { index, cookie ->
-      if (index > 0) append("; ")
-      append(cookie.name).append('=').append(cookie.value)
+  private fun cookieHeader(cookies: List<Cookie>): String =
+    buildString {
+      cookies.forEachIndexed { index, cookie ->
+        if (index > 0) append("; ")
+        append(cookie.name).append('=').append(cookie.value)
+      }
     }
-  }
 }

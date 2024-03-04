@@ -46,12 +46,6 @@ import javax.net.ssl.SSLSocket
 import javax.net.ssl.SSLSocketFactory
 import javax.net.ssl.X509KeyManager
 import javax.net.ssl.X509TrustManager
-import mockwebserver3.MockResponse
-import mockwebserver3.MockWebServer
-import mockwebserver3.PushPromise
-import mockwebserver3.QueueDispatcher
-import mockwebserver3.RecordedRequest
-import mockwebserver3.SocketPolicy
 import okhttp3.Handshake.Companion.handshake
 import okhttp3.Headers.Companion.headersOf
 import okhttp3.Headers.Companion.toHeaders
@@ -63,11 +57,19 @@ import okhttp3.RequestBody.Companion.asRequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.ResponseBody.Companion.asResponseBody
 import okhttp3.ResponseBody.Companion.toResponseBody
+import okhttp3.internal.authenticator.JavaNetAuthenticator
 import okhttp3.internal.http2.Settings
 import okhttp3.internal.proxy.NullProxySelector
 import okhttp3.internal.tls.OkHostnameVerifier
+import okhttp3.java.net.cookiejar.JavaNetCookieJar
 import okhttp3.logging.HttpLoggingInterceptor
 import okhttp3.logging.LoggingEventListener
+import okhttp3.mockwebserver.MockResponse
+import okhttp3.mockwebserver.MockWebServer
+import okhttp3.mockwebserver.PushPromise
+import okhttp3.mockwebserver.QueueDispatcher
+import okhttp3.mockwebserver.RecordedRequest
+import okhttp3.mockwebserver.SocketPolicy
 import okhttp3.tls.HandshakeCertificates
 import okhttp3.tls.HeldCertificate
 import okhttp3.tls.internal.TlsUtil.localhost
@@ -76,6 +78,7 @@ import okio.BufferedSink
 import okio.BufferedSource
 import okio.ByteString
 import okio.Timeout
+import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assumptions.assumeFalse
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Disabled
@@ -86,25 +89,32 @@ import org.junit.jupiter.api.Test
  * modern 4.0.x kotlin source-compatibility.
  */
 @Suppress(
-    "ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE",
-    "UNUSED_ANONYMOUS_PARAMETER",
-    "UNUSED_VALUE",
-    "UNUSED_VARIABLE",
-    "VARIABLE_WITH_REDUNDANT_INITIALIZER",
-    "RedundantLambdaArrow",
-    "RedundantExplicitType",
-    "IMPLICIT_NOTHING_AS_TYPE_PARAMETER"
+  "ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE",
+  "UNUSED_ANONYMOUS_PARAMETER",
+  "UNUSED_VALUE",
+  "UNUSED_VARIABLE",
+  "VARIABLE_WITH_REDUNDANT_INITIALIZER",
+  "RedundantLambdaArrow",
+  "RedundantExplicitType",
+  "IMPLICIT_NOTHING_AS_TYPE_PARAMETER",
 )
 @Disabled
 class KotlinSourceModernTest {
+  private val factory = TestValueFactory()
+
   @BeforeEach
   fun disabled() {
     assumeFalse(true)
   }
 
+  @AfterEach
+  fun tearDown() {
+    factory.close()
+  }
+
   @Test
   fun address() {
-    val address: Address = newAddress()
+    val address: Address = factory.newAddress()
     val url: HttpUrl = address.url
     val dns: Dns = address.dns
     val socketFactory: SocketFactory = address.socketFactory
@@ -180,10 +190,18 @@ class KotlinSourceModernTest {
 
   @Test
   fun callback() {
-    val callback = object : Callback {
-      override fun onFailure(call: Call, e: IOException) = TODO()
-      override fun onResponse(call: Call, response: Response) = TODO()
-    }
+    val callback =
+      object : Callback {
+        override fun onFailure(
+          call: Call,
+          e: IOException,
+        ) = TODO()
+
+        override fun onResponse(
+          call: Call,
+          response: Response,
+        ) = TODO()
+      }
   }
 
   @Test
@@ -224,12 +242,16 @@ class KotlinSourceModernTest {
 
   @Test
   fun connection() {
-    val connection = object : Connection {
-      override fun route(): Route = TODO()
-      override fun socket(): Socket = TODO()
-      override fun handshake(): Handshake? = TODO()
-      override fun protocol(): Protocol = TODO()
-    }
+    val connection =
+      object : Connection {
+        override fun route(): Route = TODO()
+
+        override fun socket(): Socket = TODO()
+
+        override fun handshake(): Handshake? = TODO()
+
+        override fun protocol(): Protocol = TODO()
+      }
   }
 
   @Test
@@ -250,8 +272,10 @@ class KotlinSourceModernTest {
     val tlsVersions: List<TlsVersion>? = connectionSpec.tlsVersions
     val cipherSuites: List<CipherSuite>? = connectionSpec.cipherSuites
     val supportsTlsExtensions: Boolean = connectionSpec.supportsTlsExtensions
-    val compatible: Boolean = connectionSpec.isCompatible(
-        localhost().sslSocketFactory().createSocket() as SSLSocket)
+    val compatible: Boolean =
+      connectionSpec.isCompatible(
+        localhost().sslSocketFactory().createSocket() as SSLSocket,
+      )
   }
 
   @Test
@@ -294,15 +318,21 @@ class KotlinSourceModernTest {
     builder = builder.path("")
     builder = builder.secure()
     builder = builder.httpOnly()
+    builder = builder.sameSite("None")
     val cookie: Cookie = builder.build()
   }
 
   @Test
   fun cookieJar() {
-    val cookieJar = object : CookieJar {
-      override fun saveFromResponse(url: HttpUrl, cookies: List<Cookie>) = TODO()
-      override fun loadForRequest(url: HttpUrl): List<Cookie> = TODO()
-    }
+    val cookieJar =
+      object : CookieJar {
+        override fun saveFromResponse(
+          url: HttpUrl,
+          cookies: List<Cookie>,
+        ) = TODO()
+
+        override fun loadForRequest(url: HttpUrl): List<Cookie> = TODO()
+      }
   }
 
   @Test
@@ -329,11 +359,14 @@ class KotlinSourceModernTest {
 
   @Test
   fun dispatcherFromMockWebServer() {
-    val dispatcher = object : mockwebserver3.Dispatcher() {
-      override fun dispatch(request: RecordedRequest): MockResponse = TODO()
-      override fun peek(): MockResponse = TODO()
-      override fun shutdown() = TODO()
-    }
+    val dispatcher =
+      object : okhttp3.mockwebserver.Dispatcher() {
+        override fun dispatch(request: RecordedRequest): MockResponse = TODO()
+
+        override fun peek(): MockResponse = TODO()
+
+        override fun shutdown() = TODO()
+      }
   }
 
   @Test
@@ -345,54 +378,106 @@ class KotlinSourceModernTest {
 
   @Test
   fun eventListener() {
-    val eventListener = object : EventListener() {
-      override fun callStart(call: Call) = TODO()
-      override fun dnsStart(call: Call, domainName: String) = TODO()
-      override fun dnsEnd(
-        call: Call,
-        domainName: String,
-        inetAddressList: List<InetAddress>
-      ) = TODO()
+    val eventListener =
+      object : EventListener() {
+        override fun callStart(call: Call) = TODO()
 
-      override fun connectStart(
-        call: Call,
-        inetSocketAddress: InetSocketAddress,
-        proxy: Proxy
-      ) = TODO()
+        override fun dnsStart(
+          call: Call,
+          domainName: String,
+        ) = TODO()
 
-      override fun secureConnectStart(call: Call) = TODO()
-      override fun secureConnectEnd(call: Call, handshake: Handshake?) = TODO()
-      override fun connectEnd(
-        call: Call,
-        inetSocketAddress: InetSocketAddress,
-        proxy: Proxy,
-        protocol: Protocol?
-      ) = TODO()
+        override fun dnsEnd(
+          call: Call,
+          domainName: String,
+          inetAddressList: List<InetAddress>,
+        ) = TODO()
 
-      override fun connectFailed(
-        call: Call,
-        inetSocketAddress: InetSocketAddress,
-        proxy: Proxy,
-        protocol: Protocol?,
-        ioe: IOException
-      ) = TODO()
+        override fun connectStart(
+          call: Call,
+          inetSocketAddress: InetSocketAddress,
+          proxy: Proxy,
+        ) = TODO()
 
-      override fun connectionAcquired(call: Call, connection: Connection) = TODO()
-      override fun connectionReleased(call: Call, connection: Connection) = TODO()
-      override fun requestHeadersStart(call: Call) = TODO()
-      override fun requestHeadersEnd(call: Call, request: Request) = TODO()
-      override fun requestBodyStart(call: Call) = TODO()
-      override fun requestBodyEnd(call: Call, byteCount: Long) = TODO()
-      override fun requestFailed(call: Call, ioe: IOException) = TODO()
-      override fun responseHeadersStart(call: Call) = TODO()
-      override fun responseHeadersEnd(call: Call, response: Response) = TODO()
-      override fun responseBodyStart(call: Call) = TODO()
-      override fun responseBodyEnd(call: Call, byteCount: Long) = TODO()
-      override fun responseFailed(call: Call, ioe: IOException) = TODO()
-      override fun callEnd(call: Call) = TODO()
-      override fun callFailed(call: Call, ioe: IOException) = TODO()
-      override fun canceled(call: Call) = TODO()
-    }
+        override fun secureConnectStart(call: Call) = TODO()
+
+        override fun secureConnectEnd(
+          call: Call,
+          handshake: Handshake?,
+        ) = TODO()
+
+        override fun connectEnd(
+          call: Call,
+          inetSocketAddress: InetSocketAddress,
+          proxy: Proxy,
+          protocol: Protocol?,
+        ) = TODO()
+
+        override fun connectFailed(
+          call: Call,
+          inetSocketAddress: InetSocketAddress,
+          proxy: Proxy,
+          protocol: Protocol?,
+          ioe: IOException,
+        ) = TODO()
+
+        override fun connectionAcquired(
+          call: Call,
+          connection: Connection,
+        ) = TODO()
+
+        override fun connectionReleased(
+          call: Call,
+          connection: Connection,
+        ) = TODO()
+
+        override fun requestHeadersStart(call: Call) = TODO()
+
+        override fun requestHeadersEnd(
+          call: Call,
+          request: Request,
+        ) = TODO()
+
+        override fun requestBodyStart(call: Call) = TODO()
+
+        override fun requestBodyEnd(
+          call: Call,
+          byteCount: Long,
+        ) = TODO()
+
+        override fun requestFailed(
+          call: Call,
+          ioe: IOException,
+        ) = TODO()
+
+        override fun responseHeadersStart(call: Call) = TODO()
+
+        override fun responseHeadersEnd(
+          call: Call,
+          response: Response,
+        ) = TODO()
+
+        override fun responseBodyStart(call: Call) = TODO()
+
+        override fun responseBodyEnd(
+          call: Call,
+          byteCount: Long,
+        ) = TODO()
+
+        override fun responseFailed(
+          call: Call,
+          ioe: IOException,
+        ) = TODO()
+
+        override fun callEnd(call: Call) = TODO()
+
+        override fun callFailed(
+          call: Call,
+          ioe: IOException,
+        ) = TODO()
+
+        override fun canceled(call: Call) = TODO()
+      }
     val none: EventListener = EventListener.NONE
   }
 
@@ -427,14 +512,15 @@ class KotlinSourceModernTest {
   @Test
   fun handshake() {
     var handshake: Handshake =
-        (localhost().sslSocketFactory().createSocket() as SSLSocket).session.handshake()
+      (localhost().sslSocketFactory().createSocket() as SSLSocket).session.handshake()
     val listOfCertificates: List<Certificate> = listOf()
-    handshake = Handshake.get(
+    handshake =
+      Handshake.get(
         TlsVersion.TLS_1_3,
         CipherSuite.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
         listOfCertificates,
-        listOfCertificates
-    )
+        listOfCertificates,
+      )
     val tlsVersion: TlsVersion = handshake.tlsVersion
     val cipherSuite: CipherSuite = handshake.cipherSuite
     val peerCertificates: List<Certificate> = handshake.peerCertificates
@@ -634,7 +720,7 @@ class KotlinSourceModernTest {
   fun javaNetAuthenticator() {
     val authenticator = JavaNetAuthenticator()
     val response = Response.Builder().build()
-    var request: Request? = authenticator.authenticate(newRoute(), response)
+    var request: Request? = authenticator.authenticate(factory.newRoute(), response)
     request = authenticator.authenticate(null, response)
   }
 
@@ -655,9 +741,10 @@ class KotlinSourceModernTest {
   fun loggingEventListenerFactory() {
     var factory: LoggingEventListener.Factory = LoggingEventListener.Factory()
     factory = LoggingEventListener.Factory(HttpLoggingInterceptor.Logger.DEFAULT)
-    factory = object : LoggingEventListener.Factory() {
-      override fun create(call: Call): EventListener = TODO()
-    }
+    factory =
+      object : LoggingEventListener.Factory() {
+        override fun create(call: Call): EventListener = TODO()
+      }
     val eventListener: EventListener = factory.create(newCall())
   }
 
@@ -710,8 +797,11 @@ class KotlinSourceModernTest {
     mockResponse = mockResponse.withSettings(Settings())
     var settings: Settings = mockResponse.settings
     settings = mockResponse.settings
-    mockResponse = mockResponse.withWebSocketUpgrade(object : WebSocketListener() {
-    })
+    mockResponse =
+      mockResponse.withWebSocketUpgrade(
+        object : WebSocketListener() {
+        },
+      )
     var webSocketListener: WebSocketListener? = mockResponse.webSocketListener
     webSocketListener = mockResponse.webSocketListener
   }
@@ -741,7 +831,7 @@ class KotlinSourceModernTest {
     mockWebServer.start(0)
     mockWebServer.start(InetAddress.getLocalHost(), 0)
     mockWebServer.shutdown()
-    var dispatcher: mockwebserver3.Dispatcher = mockWebServer.dispatcher
+    var dispatcher: okhttp3.mockwebserver.Dispatcher = mockWebServer.dispatcher
     dispatcher = mockWebServer.dispatcher
     mockWebServer.dispatcher = QueueDispatcher()
     mockWebServer.dispatcher = QueueDispatcher()
@@ -825,10 +915,12 @@ class KotlinSourceModernTest {
     val writeTimeoutMillis: Int = client.writeTimeoutMillis
     val pingIntervalMillis: Int = client.pingIntervalMillis
     val call: Call = client.newCall(Request.Builder().build())
-    val webSocket: WebSocket = client.newWebSocket(
+    val webSocket: WebSocket =
+      client.newWebSocket(
         Request.Builder().build(),
         object : WebSocketListener() {
-        })
+        },
+      )
     val newBuilder: OkHttpClient.Builder = client.newBuilder()
   }
 
@@ -901,17 +993,11 @@ class KotlinSourceModernTest {
 
   @Test
   fun queueDispatcher() {
-    var queueDispatcher: QueueDispatcher = object : QueueDispatcher() {
-      override fun dispatch(request: RecordedRequest): MockResponse = TODO()
-      override fun peek(): MockResponse = TODO()
-      override fun enqueueResponse(response: MockResponse) = TODO()
-      override fun shutdown() = TODO()
-      override fun setFailFast(failFast: Boolean) = TODO()
-      override fun setFailFast(failFastResponse: MockResponse?) = TODO()
-    }
-    queueDispatcher = QueueDispatcher()
-    var mockResponse: MockResponse = queueDispatcher.dispatch(
-        RecordedRequest("", headersOf(), listOf(), 0L, Buffer(), 0, Socket()))
+    val queueDispatcher = QueueDispatcher()
+    var mockResponse: MockResponse =
+      queueDispatcher.dispatch(
+        RecordedRequest("", headersOf(), listOf(), 0L, Buffer(), 0, Socket()),
+      )
     mockResponse = queueDispatcher.peek()
     queueDispatcher.enqueueResponse(MockResponse())
     queueDispatcher.shutdown()
@@ -921,8 +1007,16 @@ class KotlinSourceModernTest {
 
   @Test
   fun recordedRequest() {
-    var recordedRequest: RecordedRequest = RecordedRequest(
-        "", headersOf(), listOf(), 0L, Buffer(), 0, Socket())
+    var recordedRequest: RecordedRequest =
+      RecordedRequest(
+        "",
+        headersOf(),
+        listOf(),
+        0L,
+        Buffer(),
+        0,
+        Socket(),
+      )
     recordedRequest = RecordedRequest("", headersOf(), listOf(), 0L, Buffer(), 0, Socket())
     var requestUrl: HttpUrl? = recordedRequest.requestUrl
     var requestLine: String = recordedRequest.requestLine
@@ -949,10 +1043,23 @@ class KotlinSourceModernTest {
     val header: String? = request.header("")
     val headersForName: List<String> = request.headers("")
     val body: RequestBody? = request.body
+    var stringTag: String? = request.tag(String::class)
+    stringTag = request.tag<String>()
     var tag: Any? = request.tag()
     tag = request.tag(Any::class.java)
     val builder: Request.Builder = request.newBuilder()
     val cacheControl: CacheControl = request.cacheControl
+  }
+
+  @Test
+  fun requestConstructor() {
+    Request(url = "".toHttpUrl())
+    Request(
+      url = "".toHttpUrl(),
+      headers = headersOf(),
+      method = "",
+      body = "".toRequestBody(null),
+    )
   }
 
   @Test
@@ -985,13 +1092,18 @@ class KotlinSourceModernTest {
 
   @Test
   fun requestBody() {
-    var requestBody: RequestBody = object : RequestBody() {
-      override fun contentType(): MediaType? = TODO()
-      override fun contentLength(): Long = TODO()
-      override fun isDuplex(): Boolean = TODO()
-      override fun isOneShot(): Boolean = TODO()
-      override fun writeTo(sink: BufferedSink) = TODO()
-    }
+    var requestBody: RequestBody =
+      object : RequestBody() {
+        override fun contentType(): MediaType? = TODO()
+
+        override fun contentLength(): Long = TODO()
+
+        override fun isDuplex(): Boolean = TODO()
+
+        override fun isOneShot(): Boolean = TODO()
+
+        override fun writeTo(sink: BufferedSink) = TODO()
+      }
     requestBody = "".toRequestBody(null)
     requestBody = "".toRequestBody("".toMediaTypeOrNull())
     requestBody = ByteString.EMPTY.toRequestBody(null)
@@ -1018,7 +1130,7 @@ class KotlinSourceModernTest {
     val headers: Headers = response.headers
     val trailers: Headers = response.trailers()
     val peekBody: ResponseBody = response.peekBody(0L)
-    val body: ResponseBody? = response.body
+    val body: ResponseBody = response.body
     val builder: Response.Builder = response.newBuilder()
     val redirect: Boolean = response.isRedirect
     val networkResponse: Response? = response.networkResponse
@@ -1037,19 +1149,21 @@ class KotlinSourceModernTest {
     builder = builder.protocol(Protocol.HTTP_2)
     builder = builder.code(0)
     builder = builder.message("")
-    builder = builder.handshake(Handshake.get(
-        TlsVersion.TLS_1_3,
-        CipherSuite.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
-        listOf(),
-        listOf())
-    )
+    builder =
+      builder.handshake(
+        Handshake.get(
+          TlsVersion.TLS_1_3,
+          CipherSuite.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
+          listOf(),
+          listOf(),
+        ),
+      )
     builder = builder.handshake(null)
     builder = builder.header("", "")
     builder = builder.addHeader("", "")
     builder = builder.removeHeader("")
     builder = builder.headers(headersOf())
     builder = builder.body("".toResponseBody(null))
-    builder = builder.body(null)
     builder = builder.networkResponse(Response.Builder().build())
     builder = builder.networkResponse(null)
     builder = builder.cacheResponse(Response.Builder().build())
@@ -1063,12 +1177,16 @@ class KotlinSourceModernTest {
 
   @Test
   fun responseBody() {
-    var responseBody: ResponseBody = object : ResponseBody() {
-      override fun contentType(): MediaType? = TODO()
-      override fun contentLength(): Long = TODO()
-      override fun source(): BufferedSource = TODO()
-      override fun close() = TODO()
-    }
+    var responseBody: ResponseBody =
+      object : ResponseBody() {
+        override fun contentType(): MediaType? = TODO()
+
+        override fun contentLength(): Long = TODO()
+
+        override fun source(): BufferedSource = TODO()
+
+        override fun close() = TODO()
+      }
     val byteStream = responseBody.byteStream()
     val source = responseBody.source()
     val bytes = responseBody.bytes()
@@ -1087,7 +1205,7 @@ class KotlinSourceModernTest {
 
   @Test
   fun route() {
-    val route: Route = newRoute()
+    val route: Route = factory.newRoute()
     val address: Address = route.address
     val proxy: Proxy = route.proxy
     val inetSocketAddress: InetSocketAddress = route.socketAddress
@@ -1108,54 +1226,80 @@ class KotlinSourceModernTest {
 
   @Test
   fun webSocket() {
-    val webSocket = object : WebSocket {
-      override fun request(): Request = TODO()
-      override fun queueSize(): Long = TODO()
-      override fun send(text: String): Boolean = TODO()
-      override fun send(bytes: ByteString): Boolean = TODO()
-      override fun close(code: Int, reason: String?): Boolean = TODO()
-      override fun cancel() = TODO()
-    }
+    val webSocket =
+      object : WebSocket {
+        override fun request(): Request = TODO()
+
+        override fun queueSize(): Long = TODO()
+
+        override fun send(text: String): Boolean = TODO()
+
+        override fun send(bytes: ByteString): Boolean = TODO()
+
+        override fun close(
+          code: Int,
+          reason: String?,
+        ): Boolean = TODO()
+
+        override fun cancel() = TODO()
+      }
   }
 
   @Test
   fun webSocketListener() {
-    val webSocketListener = object : WebSocketListener() {
-      override fun onOpen(webSocket: WebSocket, response: Response) = TODO()
-      override fun onMessage(webSocket: WebSocket, text: String) = TODO()
-      override fun onMessage(webSocket: WebSocket, bytes: ByteString) = TODO()
-      override fun onClosing(webSocket: WebSocket, code: Int, reason: String) = TODO()
-      override fun onClosed(webSocket: WebSocket, code: Int, reason: String) = TODO()
-      override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) = TODO()
-    }
-  }
+    val webSocketListener =
+      object : WebSocketListener() {
+        override fun onOpen(
+          webSocket: WebSocket,
+          response: Response,
+        ) = TODO()
 
-  private fun newAddress(): Address {
-    return Address(
-        "",
-        0,
-        Dns.SYSTEM,
-        SocketFactory.getDefault(),
-        localhost().sslSocketFactory(),
-        OkHostnameVerifier,
-        CertificatePinner.DEFAULT,
-        Authenticator.NONE,
-        Proxy.NO_PROXY,
-        listOf(Protocol.HTTP_1_1),
-        listOf(ConnectionSpec.MODERN_TLS),
-        NullProxySelector
-    )
+        override fun onMessage(
+          webSocket: WebSocket,
+          text: String,
+        ) = TODO()
+
+        override fun onMessage(
+          webSocket: WebSocket,
+          bytes: ByteString,
+        ) = TODO()
+
+        override fun onClosing(
+          webSocket: WebSocket,
+          code: Int,
+          reason: String,
+        ) = TODO()
+
+        override fun onClosed(
+          webSocket: WebSocket,
+          code: Int,
+          reason: String,
+        ) = TODO()
+
+        override fun onFailure(
+          webSocket: WebSocket,
+          t: Throwable,
+          response: Response?,
+        ) = TODO()
+      }
   }
 
   private fun newCall(): Call {
     return object : Call {
       override fun request(): Request = TODO()
+
       override fun execute(): Response = TODO()
+
       override fun enqueue(responseCallback: Callback) = TODO()
+
       override fun cancel() = TODO()
+
       override fun isExecuted(): Boolean = TODO()
+
       override fun isCanceled(): Boolean = TODO()
+
       override fun timeout(): Timeout = TODO()
+
       override fun clone(): Call = TODO()
     }
   }
@@ -1164,12 +1308,12 @@ class KotlinSourceModernTest {
     return object : CookieHandler() {
       override fun put(
         uri: URI?,
-        responseHeaders: MutableMap<String, MutableList<String>>?
+        responseHeaders: MutableMap<String, MutableList<String>>?,
       ) = TODO()
 
       override fun get(
         uri: URI?,
-        requestHeaders: MutableMap<String, MutableList<String>>?
+        requestHeaders: MutableMap<String, MutableList<String>>?,
       ): MutableMap<String, MutableList<String>> = TODO()
     }
   }
@@ -1177,19 +1321,33 @@ class KotlinSourceModernTest {
   private fun newInterceptorChain(): Interceptor.Chain {
     return object : Interceptor.Chain {
       override fun request(): Request = TODO()
-      override fun proceed(request: Request): Response = TODO()
-      override fun connection(): Connection? = TODO()
-      override fun call(): Call = TODO()
-      override fun connectTimeoutMillis(): Int = TODO()
-      override fun withConnectTimeout(timeout: Int, unit: TimeUnit): Interceptor.Chain = TODO()
-      override fun readTimeoutMillis(): Int = TODO()
-      override fun withReadTimeout(timeout: Int, unit: TimeUnit): Interceptor.Chain = TODO()
-      override fun writeTimeoutMillis(): Int = TODO()
-      override fun withWriteTimeout(timeout: Int, unit: TimeUnit): Interceptor.Chain = TODO()
-    }
-  }
 
-  private fun newRoute(): Route {
-    return Route(newAddress(), Proxy.NO_PROXY, InetSocketAddress.createUnresolved("", 0))
+      override fun proceed(request: Request): Response = TODO()
+
+      override fun connection(): Connection? = TODO()
+
+      override fun call(): Call = TODO()
+
+      override fun connectTimeoutMillis(): Int = TODO()
+
+      override fun withConnectTimeout(
+        timeout: Int,
+        unit: TimeUnit,
+      ): Interceptor.Chain = TODO()
+
+      override fun readTimeoutMillis(): Int = TODO()
+
+      override fun withReadTimeout(
+        timeout: Int,
+        unit: TimeUnit,
+      ): Interceptor.Chain = TODO()
+
+      override fun writeTimeoutMillis(): Int = TODO()
+
+      override fun withWriteTimeout(
+        timeout: Int,
+        unit: TimeUnit,
+      ): Interceptor.Chain = TODO()
+    }
   }
 }

@@ -35,7 +35,7 @@ import okhttp3.internal.threadFactory
  * executor, it should be able to run [the configured maximum][maxRequests] number of calls
  * concurrently.
  */
-class Dispatcher constructor() {
+class Dispatcher() {
   /**
    * The maximum number of requests to execute concurrently. Above this requests queue in memory,
    * waiting for the running calls to complete.
@@ -91,11 +91,19 @@ class Dispatcher constructor() {
   private var executorServiceOrNull: ExecutorService? = null
 
   @get:Synchronized
-  @get:JvmName("executorService") val executorService: ExecutorService
+  @get:JvmName("executorService")
+  val executorService: ExecutorService
     get() {
       if (executorServiceOrNull == null) {
-        executorServiceOrNull = ThreadPoolExecutor(0, Int.MAX_VALUE, 60, TimeUnit.SECONDS,
-            SynchronousQueue(), threadFactory("$okHttpName Dispatcher", false))
+        executorServiceOrNull =
+          ThreadPoolExecutor(
+            0,
+            Int.MAX_VALUE,
+            60,
+            TimeUnit.SECONDS,
+            SynchronousQueue(),
+            threadFactory("$okHttpName Dispatcher", false),
+          )
       }
       return executorServiceOrNull!!
     }
@@ -196,10 +204,27 @@ class Dispatcher constructor() {
       isRunning = runningCallsCount() > 0
     }
 
-    // 执行所有符合条件的请求
-    for (i in 0 until executableCalls.size) {
-      val asyncCall = executableCalls[i]
-      asyncCall.executeOn(executorService)
+    // Avoid resubmitting if we can't logically progress
+    // particularly because RealCall handles a RejectedExecutionException
+    // by executing on the same thread.
+    if (executorService.isShutdown) {
+      // 执行所有符合条件的请求
+      for (i in 0 until executableCalls.size) {
+        val asyncCall = executableCalls[i]
+        asyncCall.callsPerHost.decrementAndGet()
+
+        synchronized(this) {
+          runningAsyncCalls.remove(asyncCall)
+        }
+
+        asyncCall.failRejected()
+      }
+      idleCallback?.run()
+    } else {
+      for (i in 0 until executableCalls.size) {
+        val asyncCall = executableCalls[i]
+        asyncCall.executeOn(executorService)
+      }
     }
 
     return isRunning
@@ -221,7 +246,10 @@ class Dispatcher constructor() {
     finished(runningSyncCalls, call)
   }
 
-  private fun <T> finished(calls: Deque<T>, call: T) {
+  private fun <T> finished(
+    calls: Deque<T>,
+    call: T,
+  ) {
     val idleCallback: Runnable?
     synchronized(this) {
       if (!calls.remove(call)) throw AssertionError("Call wasn't in-flight!")
@@ -251,8 +279,9 @@ class Dispatcher constructor() {
 
   @JvmName("-deprecated_executorService")
   @Deprecated(
-      message = "moved to val",
-      replaceWith = ReplaceWith(expression = "executorService"),
-      level = DeprecationLevel.ERROR)
+    message = "moved to val",
+    replaceWith = ReplaceWith(expression = "executorService"),
+    level = DeprecationLevel.ERROR,
+  )
   fun executorService(): ExecutorService = executorService
 }

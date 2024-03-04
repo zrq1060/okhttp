@@ -15,17 +15,22 @@
  */
 package okhttp3
 
+import assertk.assertThat
+import assertk.assertions.isEqualTo
+import assertk.assertions.isTrue
 import okhttp3.TestUtil.assumeNetwork
 import okhttp3.testing.PlatformRule
-import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Disabled
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.extension.RegisterExtension
 
 class CorrettoTest {
-  @JvmField @RegisterExtension val platform = PlatformRule()
-  @JvmField @RegisterExtension val clientTestRule = OkHttpClientTestRule()
+  @JvmField @RegisterExtension
+  val platform = PlatformRule()
+
+  @JvmField @RegisterExtension
+  val clientTestRule = OkHttpClientTestRule()
 
   private val client = clientTestRule.newClient()
 

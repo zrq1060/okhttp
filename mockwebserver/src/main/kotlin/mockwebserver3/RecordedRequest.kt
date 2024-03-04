@@ -20,47 +20,42 @@ import java.io.IOException
 import java.net.Inet6Address
 import java.net.Socket
 import javax.net.ssl.SSLSocket
+import okhttp3.ExperimentalOkHttpApi
 import okhttp3.Handshake
 import okhttp3.Handshake.Companion.handshake
 import okhttp3.Headers
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
-import okhttp3.TlsVersion
+import okhttp3.internal.platform.Platform
 import okio.Buffer
 
 /** An HTTP request that came into the mock web server. */
-class RecordedRequest @JvmOverloads constructor(
+@ExperimentalOkHttpApi
+class RecordedRequest(
   val requestLine: String,
-
   /** All headers. */
   val headers: Headers,
-
   /**
    * The sizes of the chunks of this request's body, or an empty list if the request's body
    * was empty or unchunked.
    */
   val chunkSizes: List<Int>,
-
   /** The total size of the body of this POST request (before truncation).*/
   val bodySize: Long,
-
   /** The body of this POST request. This may be truncated. */
   val body: Buffer,
-
   /**
    * The index of this request on its HTTP connection. Since a single HTTP connection may serve
    * multiple requests, each request is assigned its own sequence number.
    */
   val sequenceNumber: Int,
   socket: Socket,
-
   /**
    * The failure MockWebServer recorded when attempting to decode this request. If, for example,
    * the inbound request was truncated, this exception will be non-null.
    */
-  val failure: IOException? = null
+  val failure: IOException? = null,
 ) {
-  private val requestUrlFn: () -> HttpUrl?
   val method: String?
   val path: String?
 
@@ -69,31 +64,26 @@ class RecordedRequest @JvmOverloads constructor(
    * received without TLS.
    */
   val handshake: Handshake?
-
   val requestUrl: HttpUrl?
-    get() = requestUrlFn()
 
-  @get:JvmName("-deprecated_utf8Body")
-  @Deprecated(
-      message = "Use body.readUtf8()",
-      replaceWith = ReplaceWith("body.readUtf8()"),
-      level = DeprecationLevel.ERROR)
-  val utf8Body: String
-    get() = body.readUtf8()
-
-  /** Returns the connection's TLS version or null if the connection doesn't use SSL. */
-  val tlsVersion: TlsVersion?
-    get() = handshake?.tlsVersion
+  /**
+   * Returns the name of the server the client requested via the SNI (Server Name Indication)
+   * attribute in the TLS handshake. Unlike the rest of the HTTP exchange, this name is sent in
+   * cleartext and may be monitored or blocked by a proxy or other middlebox.
+   */
+  val handshakeServerNames: List<String>
 
   init {
     if (socket is SSLSocket) {
       try {
         this.handshake = socket.session.handshake()
+        this.handshakeServerNames = Platform.get().getHandshakeServerNames(socket)
       } catch (e: IOException) {
         throw IllegalArgumentException(e)
       }
     } else {
       this.handshake = null
+      this.handshakeServerNames = listOf()
     }
 
     if (requestLine.isNotEmpty()) {
@@ -106,40 +96,24 @@ class RecordedRequest @JvmOverloads constructor(
       }
       this.path = path
 
-      // Eagerly get the address, but avoid potentially variable latency with DNS lookups
-      // See https://github.com/square/okhttp/issues/4836
-      val inetAddress = socket.localAddress
-      this.requestUrlFn = {
-        val scheme = if (socket is SSLSocket) "https" else "http"
+      val scheme = if (socket is SSLSocket) "https" else "http"
+      val localPort = socket.localPort
+      val hostAndPort =
+        headers[":authority"]
+          ?: headers["Host"]
+          ?: when (val inetAddress = socket.localAddress) {
+            is Inet6Address -> "[${inetAddress.hostAddress}]:$localPort"
+            else -> "${inetAddress.hostAddress}:$localPort"
+          }
 
-        var hostname = inetAddress.hostName
-        if (inetAddress is Inet6Address && hostname.contains(':')) {
-          // hostname is likely some form representing the IPv6 bytes
-          // 2001:0db8:85a3:0000:0000:8a2e:0370:7334
-          // 2001:db8:85a3::8a2e:370:7334
-          // ::1
-          hostname = "[$hostname]"
-        }
-
-        val localPort = socket.localPort
-        // Allow null in failure case to allow for testing bad requests
-        "$scheme://$hostname:$localPort$path".toHttpUrlOrNull()
-      }
+      // Allow null in failure case to allow for testing bad requests
+      this.requestUrl = "$scheme://$hostAndPort$path".toHttpUrlOrNull()
     } else {
+      this.requestUrl = null
       this.method = null
       this.path = null
-      this.requestUrlFn = { null }
     }
   }
-
-  @Deprecated(
-      message = "Use body.readUtf8()",
-      replaceWith = ReplaceWith("body.readUtf8()"),
-      level = DeprecationLevel.WARNING)
-  fun getUtf8Body(): String = body.readUtf8()
-
-  /** Returns the first header named [name], or null if no such header exists. */
-  fun getHeader(name: String): String? = headers.values(name).firstOrNull()
 
   override fun toString(): String = requestLine
 }
